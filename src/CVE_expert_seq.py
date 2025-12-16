@@ -1,25 +1,31 @@
-from langchain.chat_models import init_chat_model
-from langchain_core.runnables import RunnableLambda, RunnableSequence
 import os
-import requests
-import time
 import json
+from typing_extensions import TypedDict
+
+import requests
+import random
+import time
 from datetime import datetime
 
-REQUEST_DELAY = 1.5
-OLLAMA = "ollama"
-CHAT_MODEL_TEMP = 0.2
+from langchain.chat_models import init_chat_model
+from langchain_core.runnables import RunnableLambda, RunnableSequence
 
 from UrlRetriver.url_retriver import extract_main_text_from_url
 from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX
 from Utility.summarizer import summarize
-from typing_extensions import TypedDict
+
+REQUEST_DELAY = 1.5
+OLLAMA = "ollama"
+CHAT_MODEL_TEMP = 0.2
+NUMBER_OF_EVALUATIONS = 5
+
 
 class CVEClassifierState(TypedDict):
     cve_id: str
     references: list[str]
     rag: str
     output: str
+
 
 def nvd_caller(state: CVEClassifierState):
     cve_id = state["cve_id"]
@@ -44,7 +50,8 @@ def nvd_caller(state: CVEClassifierState):
 
 def summary_extractor(state: CVEClassifierState):
     description = state["references"][0]
-    urls = state["references"][1:]
+    urls = state["references"][1:].copy()
+    random.shuffle(urls)
 
     reference_objs = []
 
@@ -118,8 +125,6 @@ The list of labels tha you can use:
 If you think no lables apply, return the special label "NONE".
 You can, and you should, decide more than ore label. But the most important thing is that they match the CVE.
 
-Consider all the possibile label, one at a time, and for each one look at what you have in the references and try to understand if the label match. 
-
 Return *only* valid labels or "NONE".
 Write your labels below:
 """
@@ -127,7 +132,6 @@ Write your labels below:
     os.system(f"ollama stop {CHAT_MODEL}")
 
     return {**state, "output": answer.content}
-
 
 pipeline = RunnableSequence(
     RunnableLambda(nvd_caller),
@@ -138,39 +142,42 @@ pipeline = RunnableSequence(
 
 
 if __name__ == "__main__":
-    os.chdir(os.path.join(os.path.pardir, os.path.pardir, os.path.dirname(__file__)))
-    print(f"Working directory : -{os.getcwd()}")
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    os.makedirs("logs",exist_ok=True)
-    output_file = os.path.join("logs",f"run_{run_id}.json")
+    for i in range(NUMBER_OF_EVALUATIONS):
+        os.chdir(os.path.join(os.path.pardir, os.path.pardir, os.path.dirname(__file__)))
+        print(f"Working directory : -{os.getcwd()}")
 
-    log = {
-        "pipeline_metadata": {
-            "run_id": run_id,
-            "models": {
-                "chat_model": CHAT_MODEL,
-                "summarizer_model": SUMMARIZER_MODEL
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.makedirs("logs",exist_ok=True)
+
+        output_file = os.path.join("logs",f"run_{run_id}.json")
+
+        log = {
+            "pipeline_metadata": {
+                "run_id": run_id,
+                "models": {
+                    "chat_model": CHAT_MODEL,
+                    "summarizer_model": SUMMARIZER_MODEL
+                },
+                "labels_schema": LABELS_DESCRIPTIONS
             },
-            "labels_schema": LABELS_DESCRIPTIONS
-        },
-        "cves": {}
-    }
-
-    for cve in CVE_TEST:
-        print(f"Analyzing {cve}")
-
-        state = pipeline.invoke({"cve_id": cve})
-
-        print(f"Pipeline executed")
-
-        log["cves"][cve] = {
-            "description": state["references"][0],
-            "references": state.get("_reference_objects", []),
-            "rag_input": state["rag"],
-            "classification_output": state["output"]
+            "cves": {}
         }
 
-        with open(output_file, "w") as f:
-            json.dump(log, f, indent=2)
+        for cve in CVE_TEST:
+            print(f"Analyzing {cve}")
 
-        print(f"Logs were updated \n - {os.path.abspath(output_file)}")
+            state = pipeline.invoke({"cve_id": cve})
+
+            print(f"Pipeline executed")
+
+            log["cves"][cve] = {
+                "description": state["references"][0],
+                "references": state.get("_reference_objects", []),
+                "rag_input": state["rag"],
+                "classification_output": state["output"]
+            }
+
+            with open(output_file, "w") as f:
+                json.dump(log, f, indent=2)
+
+            print(f"Logs were updated \n - {os.path.abspath(output_file)}")
