@@ -19,6 +19,7 @@ OLLAMA = "ollama"
 CHAT_MODEL_TEMP = 0.2
 NUMBER_OF_EVALUATIONS = 5
 
+random.seed(42)
 
 class CVEClassifierState(TypedDict):
     cve_id: str
@@ -58,7 +59,7 @@ def summary_extractor(state: CVEClassifierState):
     # Since some CVEs has hundreds of references, 
     # we limit up to a given number 
     for ref in urls[:REF_MAX]:
-        # we might check if we are calling the same 
+        # TODO: we might check if we are calling the same 
         # domain instead of doing this at each iteration:
         time.sleep(REQUEST_DELAY)
 
@@ -126,7 +127,7 @@ If you think no lables apply, return the special label "NONE".
 You can, and you should, decide more than ore label. But the most important thing is that they match the CVE.
 
 Return *only* valid labels or "NONE".
-Write your labels below:
+Write your labels below according to the format ["label1", "label2", "label3"...]:
 """
     answer = chat_model.invoke(query)
     os.system(f"ollama stop {CHAT_MODEL}")
