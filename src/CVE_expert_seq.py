@@ -101,7 +101,7 @@ def classifier(state: CVEClassifierState):
         )
     
     print(f"{CHAT_MODEL} instantiated")
-
+    labels_and_descriptions = '\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])
     query = f"""
 You are an AI security classification assistant.
 
@@ -115,7 +115,7 @@ Multiple labels may apply if the vulnerability clearly involves more than one ca
 
 Below is the list of supported labels and their definitions:
 
-{'\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])}
+{labels_and_descriptions}
 
 CVE identifier:
 {state['cve_id']}
@@ -137,7 +137,7 @@ Output rules:
 - Do not include explanations, reasoning, or any additional fields.
 
 Allowed labels:
-{[l for l in LABELS_DESCRIPTIONS.keys()]}
+{ALL_LABELS}
 
 """
     structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
