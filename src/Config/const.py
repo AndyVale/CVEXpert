@@ -84,5 +84,5 @@ CVE_TEST = {
 
 REF_MAX = 5
 
-CHAT_MODEL = "qwen3:0.6b"#"ministral-3:3b"#
-SUMMARIZER_MODEL = "qwen3:0.6b"#
+CHAT_MODEL = "ministral-3:3b"#
+SUMMARIZER_MODEL = "ministral-3:3b"#
