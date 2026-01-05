@@ -4,8 +4,9 @@ The idea behind this project is to develop a simple AI-based tool that allows to
 ![alt text](./imgs/system.png)
 
 TODO:
-* Build a structured output, for now using the ATT&CK lables.
-* Call the NVD and enrich model'input with the description
-* Search also for external resources (links in NVD)
-* Search also for related CWE
-* Use the the CVSS Vectors to get a sort of recall and accuracy metric
+* Build a structured output using the langchain functionality.
+* Select meaningful CVEs to test.
+* Automatize evaluation using SOTA-LLM labels.
+* Handle the absence of External references.
+    * Use CVSS metrics (4.0)
+    * CWE

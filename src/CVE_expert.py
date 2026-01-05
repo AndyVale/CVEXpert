@@ -10,7 +10,7 @@ REQUEST_DELAY = 1.5
 
 from UrlRetriver.url_retriver import extract_main_text_from_url
 from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX
-from Utility.summarizer import summarize
+from Utility.summarizer import summarize_reference
 from typing_extensions import TypedDict
 
 random.seed(42)
@@ -78,7 +78,7 @@ def summary_extractor(state:State):
 
     for i, ref in enumerate(random.sample(text_from_reference, min(REF_MAX, len(text_from_reference)))): 
         print(f"Summarizing {i}...")
-        summarized_text = summarize(ref, SUMMARIZER_MODEL)
+        summarized_text = summarize_reference(ref, SUMMARIZER_MODEL)
         summarized_references.append(summarized_text)
     
     return {"references" : summarized_references}

@@ -1,33 +1,61 @@
 from ollama import Client
+import json
 
-def summarize(text_to_summarize: str, model:str):
+def summarize_reference(text_to_summarize: str, model: str):
     """
     Summarize a NVD-CVE reference text, keeping only the core vulnerability information.
-    The summary should focus on attack type, impact, affected components, root cause,
-    and hints for classification labels. External links or irrelevant text are ignored.
     """
     
     prompt = f"""
-You are a cybersecurity summarization assistant. You will receive text extracted from an external reference linked in the NVD (National Vulnerability Database). This text often contains a mix of useful security information and unrelated webpage content, such as menus, advertisements, generic documentation, or unrelated GitHub material.
+You are a cybersecurity analysis and summarization assistant.
 
-Your role is to distill only the parts that clearly describe a software vulnerability or related aspects. The summary must focus on the essential technical elements: the type of vulnerability, its impact on systems or data, the affected components or versions, and the underlying cause or mechanism. Include only what is explicitly stated in the text—avoid speculation, assumptions, or extrapolation.
+You will receive text extracted from an external reference linked from the National Vulnerability Database (NVD).
+This text may contain a mix of useful security information and unrelated content such as website navigation, advertisements, generic documentation, blog posts, or unrelated GitHub material.
 
-The writing should be concise and human-readable, ideally limited to three to six sentences, with a neutral tone and no introductory phrases. The output must contain only the summary itself. Phrases such as “Here is the summary” or any other preamble must not appear. The result should be plain sentences, not lists or formatted blocks.
+Your task has two parts:
 
-Below is the text extracted from the CVE reference:
+1. Determine whether the provided text explicitly describes a software vulnerability or a security issue related to a CVE.
+   - The text must clearly mention a vulnerability, security flaw, or weakness, along with at least some technical details (e.g., vulnerability type, impact, affected component or version, or root cause).
+   - If the text does not clearly describe a vulnerability or security issue, it is considered not CVE-related.
+
+2. If the text is CVE-related, produce a concise summary of the vulnerability.
+   - The summary must include only information explicitly stated in the text.
+   - Focus on the vulnerability type, impact, affected components or versions, and underlying cause or mechanism when available.
+   - Do not speculate, infer missing details, or add external context.
+   - Use a neutral tone and plain sentences.
+   - The summary should be concise and human-readable, ideally limited to three to six sentences.
+   - Do not include introductions, explanations, headings, lists, or formatting.
+
+Output rules (IMPORTANT):
+- You must always provide a structured output with the following fields:
+  - `is_cve_related`: a boolean indicating whether the text describes a vulnerability.
+  - `summary`: a string containing the vulnerability summary.
+- If `is_cve_related` is true, the `summary` must contain only the vulnerability summary text.
+
+Below is the extracted reference text:
 
 {text_to_summarize}
-
-If the provided text does not actually describe anything related to a vulnerability, return an empty string instead of a summary.
-
-Write only the summary, avoiding any introduction.
-Return an empty string if the text does not describe a vulnerability or is not related to one.
-
-The summary:
-
 """
+
     c = Client()
-    
-    summarized_text = c.generate(model=model, prompt=prompt).response
-    
-    return summarized_text
+
+    response = c.generate(
+        model=model,
+        prompt=prompt,
+        format={
+            "type": "object",
+            "properties": {
+                "is_cve_related": {"type": "boolean"},
+                "summary": {"type": "string"}
+            },
+            "required": ["is_cve_related", "summary"]
+        }
+    )
+
+    try:
+        parsed = json.loads(response.response)
+    except Exception as e:
+        print(f"Error in the summary:\n\t{e}")
+        return ""
+        
+    return parsed["summary"].strip() if parsed["is_cve_related"] else ""

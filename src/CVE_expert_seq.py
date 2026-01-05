@@ -11,13 +11,14 @@ from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 
 from UrlRetriver.url_retriver import extract_main_text_from_url
-from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX
-from Utility.summarizer import summarize
+from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX, OUTPUT_SCHEMA, ALL_LABELS
+from Utility.summarizer import summarize_reference
+from Evaluator.scores import *
 
 REQUEST_DELAY = 1.5
 OLLAMA = "ollama"
 CHAT_MODEL_TEMP = 0.2
-NUMBER_OF_EVALUATIONS = 5
+NUMBER_OF_EVALUATIONS = 1
 
 random.seed(42)
 
@@ -69,7 +70,7 @@ def summary_extractor(state: CVEClassifierState):
         if not extracted:
             continue
 
-        summary = summarize(extracted, SUMMARIZER_MODEL)
+        summary = summarize_reference(extracted, SUMMARIZER_MODEL)
 
         reference_objs.append({
             "url": ref,
@@ -102,37 +103,49 @@ def classifier(state: CVEClassifierState):
     print(f"{CHAT_MODEL} instantiated")
 
     query = f"""
-You are an AI security classifier. 
-Your job is to analyze CVE descriptions, metadata, and external references, and classify the vulnerability using ONLY a predefined set of labels.
-A label applies if the vulnerability clearly involves that behavior or attack class.
-If in doubt, do not select it. Multiple labels may apply.
+You are an AI security classification assistant.
 
-Below is the list of supported labels and their meanings:
+You are given information about a Common Vulnerability and Exposure (CVE), including its official description and summarized content from external references.
+Your task is to determine which security categories (labels) accurately describe the vulnerability.
+
+A label should be selected only if the vulnerability clearly and explicitly involves that behavior or attack class.
+Do not infer, assume, or speculate.
+If there is insufficient evidence that a label applies, do not select it.
+Multiple labels may apply if the vulnerability clearly involves more than one category.
+
+Below is the list of supported labels and their definitions:
 
 {'\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])}
 
-Now classify the Common Vulnerability known as {state['cve_id']}.
+CVE identifier:
+{state['cve_id']}
 
-Here you have official description and various summarization of references about {state['cve_id']}:
-
+Information available for classification:
 {state['rag']}
 
-Your task is to return only labels from the following list, without inventing new ones and selecting only the ones that apply given the references above.
+Classification rules (IMPORTANT):
+- You must choose labels only from the predefined list provided.
+- Do not invent new labels or output free text.
+- Select only labels that are clearly supported by the provided information.
+- If none of the labels apply, explicitly indicate this by returning the special label `NONE`.
+- If labels apply, return all applicable labels.
 
-The list of labels tha you can use:
+Output rules:
+- You must return a structured output containing a single field:
+  - `labels`: an array of strings.
+- Each element in `labels` must be a valid label from the predefined list or the special value `NONE`.
+- Do not include explanations, reasoning, or any additional fields.
 
+Allowed labels:
 {[l for l in LABELS_DESCRIPTIONS.keys()]}
 
-If you think no lables apply, return the special label "NONE".
-You can, and you should, decide more than ore label. But the most important thing is that they match the CVE.
-
-Return *only* valid labels or "NONE".
-Write your labels below according to the format ["label1", "label2", "label3"...]:
 """
-    answer = chat_model.invoke(query)
+    structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
+    result = structured_model.invoke(query) # change function here
+    
     os.system(f"ollama stop {CHAT_MODEL}")
 
-    return {**state, "output": answer.content}
+    return {**state, "output": result["labels"]}
 
 pipeline = RunnableSequence(
     RunnableLambda(nvd_caller),
@@ -161,24 +174,36 @@ if __name__ == "__main__":
                 },
                 "labels_schema": LABELS_DESCRIPTIONS
             },
-            "cves": {}
+            "cves": {},
+            "aggregated_scores": {}
         }
 
-        for cve in CVE_TEST:
+        all_y_true = []
+        all_y_pred = []
+
+        for cve, expected_labels in CVE_TEST.items():
             print(f"Analyzing {cve}")
-
             state = pipeline.invoke({"cve_id": cve})
+            predicted_labels = state["output"]
 
-            print(f"Pipeline executed")
+            # store per-CVE scores
+            individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
 
             log["cves"][cve] = {
                 "description": state["references"][0],
                 "references": state.get("_reference_objects", []),
                 "rag_input": state["rag"],
-                "classification_output": state["output"]
+                "classification_output": predicted_labels,
+                "individual_scores": individual_scores
             }
 
             with open(output_file, "w") as f:
                 json.dump(log, f, indent=2)
 
             print(f"Logs were updated \n - {os.path.abspath(output_file)}")
+            all_y_true.append(expected_labels)
+            all_y_pred.append(predicted_labels)
+
+        # grouped scores after all CVEs
+        grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_LABELS)
+        log["aggregated_scores"] = grouped_scores
