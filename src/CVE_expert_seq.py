@@ -141,7 +141,7 @@ Allowed labels:
 
 """
     structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
-    result = structured_model.invoke(query) # change function here
+    result = structured_model.invoke(query)
     
     os.system(f"ollama stop {CHAT_MODEL}")
 
@@ -207,3 +207,7 @@ if __name__ == "__main__":
         # grouped scores after all CVEs
         grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_LABELS)
         log["aggregated_scores"] = grouped_scores
+        with open(output_file, "w") as f:
+            json.dump(log, f, indent=2)
+
+        print(f"Aggregated scores added to logs \n - {os.path.abspath(output_file)}")

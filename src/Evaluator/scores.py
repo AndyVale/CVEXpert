@@ -1,9 +1,9 @@
 from sklearn.preprocessing import MultiLabelBinarizer
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, jaccard_score
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 def compute_individual_scores(y_true, y_pred, all_labels):
     """
-    Compute per-CVE precision, recall, F1, exact match, Jaccard
+    Compute per-CVE precision, recall, F1
     y_true, y_pred: list of strings (labels)
     all_labels: list of all possible labels in dataset
     """
@@ -24,7 +24,7 @@ def compute_individual_scores(y_true, y_pred, all_labels):
 
 def compute_grouped_scores(all_y_true, all_y_pred, all_labels):
     """
-    Compute micro/macro/weighted metrics over the entire dataset
+    Compute metrics over the entire dataset
     all_y_true, all_y_pred: lists of lists of strings
     """
     mlb = MultiLabelBinarizer(classes=all_labels)
