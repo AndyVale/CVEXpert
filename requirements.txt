@@ -2,6 +2,7 @@
 langchain>=0.1
 langchain-ollama>=0.0.1
 ollama>=0.0.1
+langchain-openai
 
 # Text extraction / parsing
 trafilatura>=1.0
@@ -11,3 +12,4 @@ lxml[html_clean]>=4.9.2
 scikit-learn>=1.3
 
 # Optional: any other dependencies
+python-dotenv

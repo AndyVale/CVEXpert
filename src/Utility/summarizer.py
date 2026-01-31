@@ -1,5 +1,13 @@
-from ollama import Client
-import json
+import os
+
+from Config.const import SUMMARIZER_MODEL
+from langchain.chat_models import init_chat_model
+
+from dotenv import load_dotenv
+load_dotenv()
+VAST_HOST = os.getenv('VAST_HOST')
+OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
+
 
 def summarize_reference(text_to_summarize: str, model: str):
     """
@@ -37,25 +45,31 @@ Below is the extracted reference text:
 {text_to_summarize}
 """
 
-    c = Client()
+    json_schema = {
+        "title": "cve_summarizer_output",
+        "description": "Schema for summarizing CVE related texts",
+        "type": "object",
+        "properties": {
+            "is_cve_related": {"type": "boolean"},
+            "summary": {"type": "string"}
+        },
+        "required": ["is_cve_related", "summary"]
+    }
 
-    response = c.generate(
-        model=model,
-        prompt=prompt,
-        format={
-            "type": "object",
-            "properties": {
-                "is_cve_related": {"type": "boolean"},
-                "summary": {"type": "string"}
-            },
-            "required": ["is_cve_related", "summary"]
-        }
+    model = init_chat_model(
+        model = SUMMARIZER_MODEL,
+        model_provider="openai",
+        api_key= OPEN_BUTTON_TOKEN,
+        base_url=f"http://{VAST_HOST}/v1",
     )
 
+    struct_model = model.with_structured_output(json_schema)
+
     try:
-        parsed = json.loads(response.response)
+        response = struct_model.invoke(prompt)
     except Exception as e:
-        print(f"Error in the summary:\n\t{e}")
+        print(f"Problem during summarization: {e}")
         return ""
-        
-    return parsed["summary"].strip() if parsed["is_cve_related"] else ""
+    if response["is_cve_related"]:
+        return response["summary"].strip()
+    return ""

@@ -104,5 +104,5 @@ CVE_TEST = {
 
 REF_MAX = 5
 
-CHAT_MODEL = "ministral-3:3b"#
-SUMMARIZER_MODEL = "ministral-3:3b"#
+CHAT_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"
+SUMMARIZER_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"

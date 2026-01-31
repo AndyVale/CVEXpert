@@ -15,10 +15,14 @@ from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPT
 from Utility.summarizer import summarize_reference
 from Evaluator.scores import *
 
+from dotenv import load_dotenv
+load_dotenv()
+VAST_HOST = os.getenv('VAST_HOST')
+OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
+
 REQUEST_DELAY = 1.5
-OLLAMA = "ollama"
 CHAT_MODEL_TEMP = 0.2
-NUMBER_OF_EVALUATIONS = 1
+NUMBER_OF_EVALUATIONS = 4
 
 random.seed(42)
 
@@ -95,10 +99,12 @@ def formatter(state: CVEClassifierState):
 
 def classifier(state: CVEClassifierState):
     chat_model = init_chat_model(
-            model=CHAT_MODEL,
-            model_provider=OLLAMA,
-            temperature=CHAT_MODEL_TEMP,
-        )
+        model= CHAT_MODEL,
+        model_provider="openai",
+        api_key= OPEN_BUTTON_TOKEN,
+        base_url=f"http://{VAST_HOST}/v1",
+        temperature=CHAT_MODEL_TEMP,
+    )
     
     print(f"{CHAT_MODEL} instantiated")
     labels_and_descriptions = '\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])
@@ -142,8 +148,6 @@ Allowed labels:
 """
     structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
     result = structured_model.invoke(query)
-    
-    os.system(f"ollama stop {CHAT_MODEL}")
 
     return {**state, "output": result["labels"]}
 
