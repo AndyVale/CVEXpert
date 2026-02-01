@@ -1,6 +1,6 @@
 import os
 
-from Config.const import SUMMARIZER_MODEL
+from Config.const import SUMMARIZER_MODEL, LABELS_DESCRIPTIONS
 from langchain.chat_models import init_chat_model
 
 from dotenv import load_dotenv
@@ -16,21 +16,26 @@ def summarize_reference(text_to_summarize: str, summarizer_model = SUMMARIZER_MO
     
     prompt = f"""
 You are a specialized cybersecurity analyst. Your task is to process a "filtered" extraction from a web page linked to a CVE (Common Vulnerabilities and Exposures).
+Your goal is to make a clear summary that will help another cybersecurity analyst to classify the CVE into several labels:
+
+{'\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])}
 
 CONTEXT FOR THE INPUT:
 - The text below is not a full page. It is a sequence of highly relevant snippets.
 - The symbol "..." indicates where irrelevant content (like ads, navigation, or boilerplate) has been removed.
-- Your goal is to bridge these snippets into a single, cohesive technical summary, ignoring the gaps.
+- Your goal is to bridge these snippets into a single, cohesive technical summary that will help the other analyst, ignoring the gaps.
 
 TASK:
 1. Determine if the text contains specific technical evidence of a vulnerability (e.g., a bug description, a PoC, affected versions, or an advisory).
 2. If related, create a summary that:
    - Preserves all technical keywords (e.g., "buffer overflow", "null pointer", "CVE-XXXX").
-   - Identifies the affected software and version.
    - Describes the root cause and the impact.
+   - Identifies the affected software and version.
    - Maintains the exact semantic meaning of the source.
+   - Focus on creating a summary that will help the classification of the CVE.
 
 CONSTRAINTS:
+- Produce the summary as described above.
 - Use 3 to 6 sentences.
 - Use a professional, dry, technical tone.
 - If the remaining text is too fragmented to identify a specific vulnerability, mark `is_cve_related` as false.
