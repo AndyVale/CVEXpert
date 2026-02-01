@@ -3,7 +3,7 @@ from llama_index.core import Document
 from llama_index.core.node_parser import SemanticSplitterNodeParser
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-from UrlRetriver.filters import *
+from filters import *
 
 EMBED_MODEL = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
@@ -60,5 +60,11 @@ if __name__ == '__main__':
     
     # This query defines what "signal" we want to keep vs "noise".
     RELEVANCE_QUERY = "What type of vulnerability is it?"
-    T = 5
-    print(get_filtered_content_from_url(url, RELEVANCE_QUERY, T, filter_with_cross_encoder))
+    T = .35
+    filtered, not_filtered = (get_filtered_content_from_url(url, RELEVANCE_QUERY, T, cosine_filter))
+
+    with open("filtered.txt", "w") as f:
+        f.write('\n-------\n'.join(filtered))
+
+    with open("not_filtered.txt", "w") as f:
+        f.write('\n-------\n'.join(not_filtered))

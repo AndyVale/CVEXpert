@@ -11,7 +11,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 
 from UrlRetriver.url_retriver import get_filtered_content_from_url
-from UrlRetriver.filters import filter_with_cross_encoder
+from UrlRetriver.filters import filter_with_cross_encoder, cosine_filter
 from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX, NOT_NONE_REF_MAX, OUTPUT_SCHEMA, ALL_LABELS
 from Utility.summarizer import summarize_reference
 from Evaluator.scores import *
@@ -56,7 +56,6 @@ def nvd_caller(state: CVEClassifierState):
         return {**state, "references": [f"Parsing error: {e}"]}
 
 def summary_extractor(state: CVEClassifierState):
-    description = state["references"][0]
     urls = state["references"][1:].copy()
     random.shuffle(urls)
 
@@ -73,7 +72,7 @@ def summary_extractor(state: CVEClassifierState):
         RELEVANCE_QUERY = "What type of vulnerability is it?"
 
         # Extract the text using "Trafilatura libary"
-        chunks, filtered_chunks = get_filtered_content_from_url(ref, RELEVANCE_QUERY,  6, filter_with_cross_encoder)
+        filtered_chunks, chunks = get_filtered_content_from_url(ref, RELEVANCE_QUERY,  6, filter_with_cross_encoder)
 
         extracted = '\n\n'.join(filtered_chunks)
 
@@ -96,7 +95,7 @@ def summary_extractor(state: CVEClassifierState):
         if  c >= NOT_NONE_REF_MAX or len(reference_objs) >= REF_MAX:
             break
 
-    summarized_references = [description] + [r["summary"] for r in reference_objs]
+    summarized_references = [r["summary"] for r in reference_objs]
 
     return {
         **state,
@@ -105,10 +104,23 @@ def summary_extractor(state: CVEClassifierState):
     }
 
 def formatter(state: CVEClassifierState):
-    rag_text = "".join([f"{i+1}. {x}\n" 
-                        for i, x in 
-                        enumerate(state["summarized_references"])])
-    
+    nvd_desc = state["references"][0]
+    # External summaries are secondary, providing technical depth
+    if state["summarized_references"]:
+        ref_sections = []
+        tech_references = [t_ref for t_ref in state["summarized_references"] if t_ref]
+        for i, x in enumerate(tech_references):
+            ref_sections.append(f"[Technical Insight from Reference {i+1}]\n{x}")
+        references_text = "\n\n".join(ref_sections)
+    else:
+        references_text = "No additional technical references provided."
+
+    rag_text = f"""--- PRIMARY SOURCE: NVD DESCRIPTION ---
+{nvd_desc}
+
+--- SECONDARY SOURCES: TECHNICAL SUMMARIES ---
+{references_text}
+"""
     return {**state, "rag": rag_text}
 
 def classifier(state: CVEClassifierState):
@@ -121,48 +133,42 @@ def classifier(state: CVEClassifierState):
     )
     
     labels_and_descriptions = '\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])
-    query = f"""
-You are an AI security classification assistant.
+    query = f"""You are a Security Research Assistant specialized in vulnerability classification.
 
-You are given information about a Common Vulnerability and Exposure (CVE), including its official description and summarized content from external references.
-Your task is to determine which security categories (labels) accurately describe the vulnerability.
+OBJECTIVE:
+Assign the most accurate security labels to the given CVE based on the evidence provided.
 
-A label should be selected only if the vulnerability clearly and explicitly involves that behavior or attack class.
-Do not infer, assume, or speculate.
-If there is insufficient evidence that a label applies, do not select it.
-Multiple labels may apply if the vulnerability clearly involves more than one category.
+CONTEXT ON DATA SOURCES:
+1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
+2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
 
-Below is the list of supported labels and their definitions:
-
+SUPPORTED LABELS:
 {labels_and_descriptions}
 
-CVE identifier:
-{state['cve_id']}
-
-Information available for classification:
+VULNERABILITY DATA (ID: {state['cve_id']}):
 {state['rag']}
 
-Classification rules (IMPORTANT):
-- You must choose labels only from the predefined list provided.
-- Do not invent new labels or output free text.
-- Select only labels that are clearly supported by the provided information.
-- If none of the labels apply, explicitly indicate this by returning the special label `NONE`.
-- If labels apply, return all applicable labels.
+ASSIGNMENT STEPS:
+1. Analyze the Primary Source for the main vulnerability impact.
+2. Evaluate the Secondary Sources for technical specifics (e.g., specific code injection methods, memory management issues).
+3. Select labels where the technical description matches the label definition.
+4. If the information is insufficient to match any specific category, select the special label "NONE".
 
-Output rules:
-- You must return a structured output containing a single field:
-  - `labels`: an array of strings.
-- Each element in `labels` must be a valid label from the predefined list or the special value `NONE`.
-- Do not include explanations, reasoning, or any additional fields.
+OUTPUT REQUIREMENTS:
+- Provide a structured JSON object with a single field "labels" containing an array of strings.
+- Ensure every label is selected directly from the list below.
 
-Allowed labels:
-{ALL_LABELS}
-
+ALLOWED LABELS:
+{list(LABELS_DESCRIPTIONS.keys()) + ["NONE"]}
 """
-    structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
-    result = structured_model.invoke(query)
-
-    return {**state, "output": result["labels"]}
+    
+    try:
+        structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
+        result = structured_model.invoke(query)
+        return {**state, "output": result["labels"]}
+    except Exception as e:
+        print(f"Classification error: {e}")
+        return {"labels": ["NONE"]}
 
 pipeline = RunnableSequence(
     RunnableLambda(nvd_caller),
