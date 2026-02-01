@@ -10,19 +10,20 @@ from datetime import datetime
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 
-from UrlRetriver.url_retriver import extract_main_text_from_url
-from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX, OUTPUT_SCHEMA, ALL_LABELS
+from UrlRetriver.url_retriver import get_filtered_content_from_url
+from UrlRetriver.filters import filter_with_cross_encoder
+from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX, NOT_NONE_REF_MAX, OUTPUT_SCHEMA, ALL_LABELS
 from Utility.summarizer import summarize_reference
 from Evaluator.scores import *
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(".env")
 VAST_HOST = os.getenv('VAST_HOST')
 OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
 
 REQUEST_DELAY = 1.5
 CHAT_MODEL_TEMP = 0.2
-NUMBER_OF_EVALUATIONS = 4
+NUMBER_OF_EVALUATIONS = 3
 
 random.seed(42)
 
@@ -62,15 +63,21 @@ def summary_extractor(state: CVEClassifierState):
     reference_objs = []
 
     # Since some CVEs has hundreds of references, 
-    # we limit up to a given number 
-    for ref in urls[:REF_MAX]:
+    # we limit up to a given number
+    c = 0
+    for ref in urls:
         # TODO: we might check if we are calling the same 
         # domain instead of doing this at each iteration:
         time.sleep(REQUEST_DELAY)
 
-        # Extract the text using "Trafilatura libary"
-        extracted = extract_main_text_from_url(ref)
+        RELEVANCE_QUERY = "What type of vulnerability is it?"
 
+        # Extract the text using "Trafilatura libary"
+        chunks, filtered_chunks = get_filtered_content_from_url(ref, RELEVANCE_QUERY,  6, filter_with_cross_encoder)
+
+        extracted = '\n\n'.join(filtered_chunks)
+
+        print("Extracted chars:",len(extracted))
         if not extracted:
             continue
 
@@ -78,9 +85,16 @@ def summary_extractor(state: CVEClassifierState):
 
         reference_objs.append({
             "url": ref,
+            "chunks" : chunks,
+            "filtered_chunks" : filtered_chunks,
             "extracted_text": extracted,
             "summary": summary
         })
+        
+        if summary:
+            c += 1
+        if  c >= NOT_NONE_REF_MAX or len(reference_objs) >= REF_MAX:
+            break
 
     summarized_references = [description] + [r["summary"] for r in reference_objs]
 
@@ -106,7 +120,6 @@ def classifier(state: CVEClassifierState):
         temperature=CHAT_MODEL_TEMP,
     )
     
-    print(f"{CHAT_MODEL} instantiated")
     labels_and_descriptions = '\n'.join([f"* {k}: {v}" for k, v in LABELS_DESCRIPTIONS.items()])
     query = f"""
 You are an AI security classification assistant.
@@ -164,7 +177,7 @@ if __name__ == "__main__":
         os.chdir(os.path.join(os.path.pardir, os.path.pardir, os.path.dirname(__file__)))
         print(f"Working directory : -{os.getcwd()}")
 
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S_semantic_split")
         os.makedirs("logs",exist_ok=True)
 
         output_file = os.path.join("logs",f"run_{run_id}.json")

@@ -4,45 +4,46 @@ from Config.const import SUMMARIZER_MODEL
 from langchain.chat_models import init_chat_model
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(".env")
 VAST_HOST = os.getenv('VAST_HOST')
 OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
 
-
-def summarize_reference(text_to_summarize: str, model: str):
+def summarize_reference(text_to_summarize: str, summarizer_model = SUMMARIZER_MODEL):
     """
     Summarize a NVD-CVE reference text, keeping only the core vulnerability information.
+    The input contains "..." placeholders representing removed irrelevant content.
     """
     
     prompt = f"""
-You are a cybersecurity analysis and summarization assistant.
+You are a specialized cybersecurity analyst. Your task is to process a "filtered" extraction from a web page linked to a CVE (Common Vulnerabilities and Exposures).
 
-You will receive text extracted from an external reference linked from the National Vulnerability Database (NVD).
-This text may contain a mix of useful security information and unrelated content such as website navigation, advertisements, generic documentation, blog posts, or unrelated GitHub material.
+CONTEXT FOR THE INPUT:
+- The text below is not a full page. It is a sequence of highly relevant snippets.
+- The symbol "..." indicates where irrelevant content (like ads, navigation, or boilerplate) has been removed.
+- Your goal is to bridge these snippets into a single, cohesive technical summary, ignoring the gaps.
 
-Your task has two parts:
+TASK:
+1. Determine if the text contains specific technical evidence of a vulnerability (e.g., a bug description, a PoC, affected versions, or an advisory).
+2. If related, create a summary that:
+   - Preserves all technical keywords (e.g., "buffer overflow", "null pointer", "CVE-XXXX").
+   - Identifies the affected software and version.
+   - Describes the root cause and the impact.
+   - Maintains the exact semantic meaning of the source.
 
-1. Determine whether the provided text explicitly describes a software vulnerability or a security issue related to a CVE.
-   - The text must clearly mention a vulnerability, security flaw, or weakness, along with at least some technical details (e.g., vulnerability type, impact, affected component or version, or root cause).
-   - If the text does not clearly describe a vulnerability or security issue, it is considered not CVE-related.
+CONSTRAINTS:
+- Use 3 to 6 sentences.
+- Use a professional, dry, technical tone.
+- If the remaining text is too fragmented to identify a specific vulnerability, mark `is_cve_related` as false.
 
-2. If the text is CVE-related, produce a concise summary of the vulnerability.
-   - The summary must include only information explicitly stated in the text.
-   - Focus on the vulnerability type, impact, affected components or versions, and underlying cause or mechanism when available.
-   - Do not speculate, infer missing details, or add external context.
-   - Use a neutral tone and plain sentences.
-   - The summary should be concise and human-readable, ideally limited to three to six sentences.
-   - Do not include introductions, explanations, headings, lists, or formatting.
+OUTPUT FORMAT:
+Return a JSON object with:
+- `is_cve_related`: (boolean)
+- `summary`: (string)
 
-Output rules (IMPORTANT):
-- You must always provide a structured output with the following fields:
-  - `is_cve_related`: a boolean indicating whether the text describes a vulnerability.
-  - `summary`: a string containing the vulnerability summary.
-- If `is_cve_related` is true, the `summary` must contain only the vulnerability summary text.
-
-Below is the extracted reference text:
-
+EXTRACTED TEXT TO ANALYZE:
+---
 {text_to_summarize}
+---
 """
 
     json_schema = {
@@ -57,7 +58,7 @@ Below is the extracted reference text:
     }
 
     model = init_chat_model(
-        model = SUMMARIZER_MODEL,
+        model = summarizer_model,
         model_provider="openai",
         api_key= OPEN_BUTTON_TOKEN,
         base_url=f"http://{VAST_HOST}/v1",
@@ -67,9 +68,9 @@ Below is the extracted reference text:
 
     try:
         response = struct_model.invoke(prompt)
+        if response["is_cve_related"]:
+            return response["summary"].strip()
     except Exception as e:
-        print(f"Problem during summarization: {e}")
-        return ""
-    if response["is_cve_related"]:
-        return response["summary"].strip()
+        print(f"Error during structured summarization: {e}")
+    
     return ""

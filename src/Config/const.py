@@ -102,7 +102,8 @@ CVE_TEST = {
 }
 
 
-REF_MAX = 5
+REF_MAX = 20
+NOT_NONE_REF_MAX = 6
 
 CHAT_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"
 SUMMARIZER_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"
