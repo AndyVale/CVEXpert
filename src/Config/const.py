@@ -29,11 +29,9 @@ OUTPUT_SCHEMA = {
                     "enum": ALL_LABELS
                 },
                 "minItems": 1,
-                "uniqueItems": True
             }
         },
         "required": ["labels"],
-        "additionalProperties": False
     }
 
 CVE_TEST = {
