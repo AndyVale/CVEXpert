@@ -70,7 +70,7 @@ CVE_TEST = {
 
     # color-name npm Supply Chain Attack
     # This CVE identifies a supply chain attack where the 'color-name' npm package was compromised via an account takeover (phishing). The attacker published a malicious version (2.0.1) containing an obfuscated payload that targets cryptocurrency transactions in browser environments. Since the provided labels describe specific technical software vulnerabilities (CWEs) and do not cover malicious code insertion or supply chain compromises, "NONE" is the most appropriate choice.
-    "CVE-2025-59145": ["NONE"], # Also XSS can be accepted
+    "CVE-2025-59145": ["CodeInjection", "XSS"], 
     # FortiWeb Path Traversal
     # This critical vulnerability is a relative path traversal flaw in the Fortinet FortiWeb GUI and API. By sending crafted HTTP requests with traversal sequences, an unauthenticated attacker can bypass authentication (Access Control) to reach internal system binaries and execute administrative commands (Command Injection). The issue stems from improper validation of path-related input.
     "CVE-2025-64446": ["PathTraversal", "AccessControl", "CommandInjection", "InputValidation"],
@@ -87,9 +87,9 @@ CVE_TEST = {
     # Ivanti Connect Secure RCE
     # This vulnerability is a critical stack-based buffer overflow in the web component of Ivanti gateways. It occurs due to improper input validation when handling 'clientCapabilities' data, where the software fails to enforce buffer limits during a memory copy operation. This allows an unauthenticated remote attacker to overwrite stack memory, bypass access controls, and achieve remote code execution (RCE).
     "CVE-2025-0282": ["BufferOverflow", "InputValidation", "AccessControl"],
-    # Ivanti EPM SQL Injection
-    # This critical vulnerability in Ivanti Endpoint Manager (EPM) allows an unauthenticated remote attacker to execute arbitrary SQL commands. Due to improper input validation of data processed by the core server, an attacker can manipulate the underlying database and potentially achieve remote code execution. This failure to sanitize inputs leads to a complete bypass of access control mechanisms.
-    "CVE-2025-0994": ["SQLi", "InputValidation", "AccessControl"],
+    # Trimble Cityworks
+    # Trimble Cityworks versions prior to 15.8.9 and Cityworks with office companion versions prior to 23.10 are vulnerable to a deserialization vulnerability.
+    "CVE-2025-0994": ["UntrustedDeserialization"],
     # IngressNightmare
     # This critical vulnerability allows unauthenticated attackers with pod network access to inject malicious NGINX directives via crafted AdmissionReview requests to the ingress-nginx Admission Webhook. This leads to Remote Code Execution (Code Injection) and the logical exposure of cluster-wide Secrets (InfoLeak). The flaw stems from improper validation of admission requests, enabling a complete bypass of standard Kubernetes RBAC and authorization boundaries (Access Control).
     "CVE-2025-1974": ["CodeInjection", "InfoLeak", "AccessControl", "InputValidation"],
@@ -102,8 +102,8 @@ CVE_TEST = {
 }
 
 
-REF_MAX = 20
-NOT_NONE_REF_MAX = 6
+REF_MAX = 10
+NOT_NONE_REF_MAX = 5
 
-CHAT_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"
-SUMMARIZER_MODEL = "mistralai/Ministral-3-3B-Instruct-2512"
+CHAT_MODEL = "Qwen/Qwen3-4B"
+SUMMARIZER_MODEL = "Qwen/Qwen3-4B"#"mistralai/Ministral-3-3B-Instruct-2512"
