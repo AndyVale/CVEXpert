@@ -70,7 +70,7 @@ EXTRACTED TEXT TO ANALYZE:
     )
 
     struct_model = model.with_structured_output(json_schema)
-
+    print("Summarizing...")
     try:
         response = struct_model.invoke(prompt)
         if response["is_cve_related"]:

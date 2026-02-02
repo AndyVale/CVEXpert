@@ -10,7 +10,7 @@ from datetime import datetime
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableLambda, RunnableSequence
 
-from UrlRetriver.url_retriver import get_filtered_content_from_url
+from UrlRetriver.url_retriver import get_filtered_content_from_url, extract_main_text_from_url
 from UrlRetriver.filters import filter_with_cross_encoder, cosine_filter
 from Config.const import CHAT_MODEL, SUMMARIZER_MODEL, CVE_TEST, LABELS_DESCRIPTIONS, REF_MAX, NOT_NONE_REF_MAX, OUTPUT_SCHEMA, ALL_LABELS
 from Utility.summarizer import summarize_reference
@@ -21,9 +21,9 @@ load_dotenv(".env")
 VAST_HOST = os.getenv('VAST_HOST')
 OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
 
-REQUEST_DELAY = 1.5
+REQUEST_DELAY = .5
 CHAT_MODEL_TEMP = 0.2
-NUMBER_OF_EVALUATIONS = 3
+NUMBER_OF_EVALUATIONS = 4
 
 random.seed(42)
 
@@ -81,6 +81,8 @@ def summary_extractor(state: CVEClassifierState):
             continue
 
         summary = summarize_reference(extracted, SUMMARIZER_MODEL)
+
+        print("Summary length:",len(summary))
 
         reference_objs.append({
             "url": ref,
