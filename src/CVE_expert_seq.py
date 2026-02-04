@@ -1,21 +1,18 @@
 import os
 import json
-from Graph.state import CVEClassifierState
 
-import requests
 import random
-import time
 from datetime import datetime
 import langchain_core.runnables as lcr
 
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, SUMMARIZER_MODEL, REF_MAX, NOT_NONE_REF_MAX
+from Definitions.config import CHAT_MODEL, SUMMARIZER_MODEL
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.scrapers import extract_md_trafilatura
 from Graph.Nodes.chunkers import semantic_chunker
-from Graph.Nodes.filters import filter_with_cross_encoder
+from Graph.Nodes.filters import CosineFilterNode
 from Graph.Nodes.summarizers import summarize_reference
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
@@ -78,13 +75,18 @@ if __name__ == "__main__":
     NUMBER_OF_EVALUATIONS = 4
     random.seed(42)
 
+    cosine_filter = CosineFilterNode(
+        query="What type of vulnerability is it?",
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        threshold=0.3
+    )
+
     pipeline = (
         lcr.RunnableLambda(nvd_caller)
         | extract_md_trafilatura    
         | semantic_chunker
-        | summarize_reference
-        | formatter
-        | classifier
+        | cosine_filter
+
     )
 
     for i in range(NUMBER_OF_EVALUATIONS):
