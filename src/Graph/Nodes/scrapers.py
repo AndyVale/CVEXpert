@@ -54,7 +54,8 @@ def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
         except Exception as e:
             print(f"Fail in extracting content of page at: {url_ref}\n{e}")
 
-    return {**state, "nvd_references_pages": pages_dict}
+    return {**state,
+            "nvd_references_pages": pages_dict}
 
 
 def get_filtered_content_from_url(url: str, similarity_query, filter_parameter, filter_function): # TODO: REMOVE THIS FUNCTION

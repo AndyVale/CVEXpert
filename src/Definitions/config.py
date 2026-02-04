@@ -10,5 +10,5 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv(".env")
-VAST_HOST = os.getenv('VAST_HOST')
+VAST_IP_PORT = os.getenv('VAST_IP_PORT')
 OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')

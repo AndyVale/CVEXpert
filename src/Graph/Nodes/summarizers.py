@@ -125,6 +125,8 @@ EXTRACTED TEXT TO ANALYZE:
                 
                 if response and response.get("is_cve_related") and response.get("summary"):
                     summaries_dict[url] = response["summary"].strip()
+
+                print("Summarization completed")
                 
             except Exception as e:
                 print(f"Error during structured summarization for {url}: {e}")
