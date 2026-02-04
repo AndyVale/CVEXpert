@@ -41,6 +41,7 @@ OUTPUT REQUIREMENTS:
 ALLOWED LABELS:
 {list(LABELS_DESCRIPTIONS.keys()) + ["NONE"]}
 """
+    
     OUTPUT_SCHEMA = {
         "title": "CVEClassification",
         "type": "object",
@@ -60,7 +61,7 @@ ALLOWED LABELS:
     try:
         structured_model = chat_model.with_structured_output(OUTPUT_SCHEMA)
         result = structured_model.invoke(query)
-        return {**state, "output": result["labels"]}
+        return {**state, "cve_labels": result["labels"]}
     except Exception as e:
         print(f"Classification error: {e}")
-        return {"labels": ["NONE"]}
+        return {**state, "cve_labels": result["labels"]}

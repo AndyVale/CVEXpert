@@ -1,11 +1,11 @@
 from Graph.state import CVEClassifierState
 
 def formatter(state: CVEClassifierState):
-    nvd_desc = state["references"][0]
-    # External summaries are secondary, providing technical depth
-    if state["summarized_references"]:
+    nvd_desc = state["nvd_description"]
+
+    if state["summaries"]:
         ref_sections = []
-        tech_references = [t_ref for t_ref in state["summarized_references"] if t_ref]
+        tech_references = [summary for url, summary in state["summaries"].items() if summary] # TODO: url is not used
         for i, x in enumerate(tech_references):
             ref_sections.append(f"[Technical Insight from Reference {i+1}]\n{x}")
         references_text = "\n\n".join(ref_sections)
