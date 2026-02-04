@@ -1,5 +1,5 @@
 .env
 .venv
 .vscode
-src/logs/
+logs/
 __pycache__

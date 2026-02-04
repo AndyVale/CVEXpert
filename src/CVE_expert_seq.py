@@ -33,7 +33,6 @@ class CVEClassifierState(TypedDict):
     rag: str
     output: str
 
-
 def nvd_caller(state: CVEClassifierState):
     cve_id = state["cve_id"]
     url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -182,7 +181,8 @@ pipeline = RunnableSequence(
 
 if __name__ == "__main__":
     for i in range(NUMBER_OF_EVALUATIONS):
-        os.chdir(os.path.join(os.path.pardir, os.path.pardir, os.path.dirname(__file__)))
+        os.chdir(os.path.dirname(__file__))
+        os.chdir(os.path.pardir)
         print(f"Working directory : -{os.getcwd()}")
 
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S_semantic_split")
