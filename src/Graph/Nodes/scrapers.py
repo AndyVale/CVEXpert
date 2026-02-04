@@ -18,7 +18,7 @@ def extract_main_text_from_url(url: str) -> str:
     except Exception:
         return ""
 
-def extract_md_trafilatura(state: CVEClassifierState):
+def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
     """
     Fetches and extracts Markdown content from NVD reference URLs using Trafilatura.
 

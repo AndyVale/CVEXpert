@@ -1,7 +1,7 @@
 import requests
 from Graph.state import CVEClassifierState
 
-def nvd_caller(state: CVEClassifierState):
+def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
     """
     Retrieves official CVE information from the National Vulnerability Database (NVD) API.
 

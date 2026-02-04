@@ -1,6 +1,6 @@
 from Graph.state import CVEClassifierState
 
-def formatter(state: CVEClassifierState):
+def formatter(state: CVEClassifierState) -> CVEClassifierState:
     nvd_desc = state["nvd_description"]
 
     if state["summaries"]:
