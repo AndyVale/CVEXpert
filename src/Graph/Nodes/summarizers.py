@@ -1,12 +1,6 @@
-import os
-
-from Config.const import SUMMARIZER_MODEL, LABELS_DESCRIPTIONS
+from Definitions.config import SUMMARIZER_MODEL, VAST_HOST, OPEN_BUTTON_TOKEN
+from Definitions.labels import LABELS_DESCRIPTIONS
 from langchain.chat_models import init_chat_model
-
-from dotenv import load_dotenv
-load_dotenv(".env")
-VAST_HOST = os.getenv('VAST_HOST')
-OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
 
 def summarize_reference(text_to_summarize: str, summarizer_model = SUMMARIZER_MODEL):
     """

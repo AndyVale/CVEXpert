@@ -3,10 +3,7 @@ from llama_index.core import Document
 from llama_index.core.node_parser import SemanticSplitterNodeParser
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-from UrlRetriver.filters import *
-
 EMBED_MODEL = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
-
 def extract_main_text_from_url(url: str) -> str:
     """
     Fetch a URL and extract only the main meaningful text content using Trafilatura.
@@ -42,7 +39,7 @@ def get_semantic_chunks(text: str) -> list[str]:
     return [node.get_content() for node in nodes]
 
 
-def get_filtered_content_from_url(url: str, similarity_query, filter_parameter, filter_function = cosine_filter) :
+def get_filtered_content_from_url(url: str, similarity_query, filter_parameter, filter_function) :
     """
     Wrapper function to call extract_main_text_from_url->get_semantic_chunks->filter_relevant_chunks
     """
@@ -54,17 +51,3 @@ def get_filtered_content_from_url(url: str, similarity_query, filter_parameter, 
     filtered_chunks = filter_function(chunks, similarity_query, filter_parameter)
 
     return filtered_chunks, chunks
-
-if __name__ == '__main__':
-    url = "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised"
-    
-    # This query defines what "signal" we want to keep vs "noise".
-    RELEVANCE_QUERY = "What type of vulnerability is it?"
-    T = .25
-    filtered, not_filtered = (get_filtered_content_from_url(url, RELEVANCE_QUERY, T, cosine_filter))
-
-    with open("filtered.txt", "w") as f:
-        f.write('\n-------\n'.join(filtered))
-
-    with open("not_filtered.txt", "w") as f:
-        f.write('\n-------\n'.join(not_filtered))
