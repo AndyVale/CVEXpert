@@ -60,7 +60,7 @@ if __name__ == "__main__":
         log_dir = os.path.join(os.path.dirname(base_dir), "logs")
         os.makedirs(log_dir, exist_ok=True)
 
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%")
+        run_id = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         output_file = os.path.join(log_dir, f"run_{run_id}.json")
 
         log = {
