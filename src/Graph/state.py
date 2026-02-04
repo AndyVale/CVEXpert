@@ -8,6 +8,7 @@ class CVEClassifierState(TypedDict):
         cve_id: The unique identifier of the CVE.
         nvd_description: The official vulnerability description retrieved from the NVD API.
         nvd_url_references: A complete list of all external reference URLs provided by NVD.
+        nvd_references_pages: A dictionary mapping each URL to its full extracted text content.
         nvd_references_chunks: A dictionary mapping each (processed) URL to its full list of 
             extracted chunks (e.g. after a chunking phase).
         nvd_filtered_chunks: A dictionary mapping each URL to the subset of chunks 
@@ -19,6 +20,7 @@ class CVEClassifierState(TypedDict):
     cve_id: str
     nvd_description: str
     nvd_url_references: list[str]
+    nvd_references_pages: dict[str, str]
     nvd_references_chunks: dict[str, list[str]]
     nvd_filtered_chunks: dict[str, list[str]]
     summaries: dict[str, str]

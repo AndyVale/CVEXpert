@@ -6,24 +6,25 @@ import requests
 import random
 import time
 from datetime import datetime
-
-from langchain_core.runnables import RunnableLambda, RunnableSequence
+import langchain_core.runnables as lcr
 
 from Definitions.const import CVE_TEST
 from Definitions.config import CHAT_MODEL, SUMMARIZER_MODEL, REF_MAX, NOT_NONE_REF_MAX
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
-from Graph.Nodes.filters import filter_with_cross_encoder, cosine_filter
-from Graph.Nodes.scrapers import get_filtered_content_from_url, extract_main_text_from_url
+from Graph.Nodes.nvd import nvd_caller
+from Graph.Nodes.scrapers import extract_md_trafilatura
+from Graph.Nodes.chunkers import semantic_chunker
+from Graph.Nodes.filters import filter_with_cross_encoder
 from Graph.Nodes.summarizers import summarize_reference
 from Graph.Nodes.evaluators import *
-from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import classifier
 
 REQUEST_DELAY = .5
+random.seed(42)
 
-def summary_extractor(state: CVEClassifierState):
+"""def summary_extractor(state: CVEClassifierState):
     urls = state["references"][1:].copy()
     random.shuffle(urls)
 
@@ -33,14 +34,13 @@ def summary_extractor(state: CVEClassifierState):
     # we limit up to a given number
     c = 0
     for ref in urls:
-        # TODO: we might check if we are calling the same 
         # domain instead of doing this at each iteration:
         time.sleep(REQUEST_DELAY)
 
         RELEVANCE_QUERY = "What type of vulnerability is it?"
 
         # Extract the text using "Trafilatura libary"
-        filtered_chunks, chunks = get_filtered_content_from_url(ref, RELEVANCE_QUERY,  6, filter_with_cross_encoder)
+        filtered_chunks, chunks = [],[] #get_filtered_content_from_url(ref, RELEVANCE_QUERY,  6, filter_with_cross_encoder)
 
         extracted = '\n\n'.join(filtered_chunks)
 
@@ -71,20 +71,21 @@ def summary_extractor(state: CVEClassifierState):
         **state,
         "summarized_references": summarized_references,
         "_reference_objects": reference_objs  # for JSON logging
-    }
-
-
-pipeline = RunnableSequence(
-    RunnableLambda(nvd_caller),
-    RunnableLambda(summary_extractor),
-    RunnableLambda(formatter),
-    RunnableLambda(classifier),
-)
+    }"""
 
 
 if __name__ == "__main__":
     NUMBER_OF_EVALUATIONS = 4
     random.seed(42)
+
+    pipeline = (
+        lcr.RunnableLambda(nvd_caller)
+        | extract_md_trafilatura    
+        | semantic_chunker
+        | summarize_reference
+        | formatter
+        | classifier
+    )
 
     for i in range(NUMBER_OF_EVALUATIONS):
         os.chdir(os.path.dirname(__file__))

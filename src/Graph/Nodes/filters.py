@@ -2,12 +2,12 @@ import numpy as np
 from sentence_transformers import CrossEncoder
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
-EMBED_MODEL = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
 def cosine_filter(chunks: list[str], query: str, threshold: float = 0.30) -> list[str]:
     """
     Filters chunks by semantic similarity while preserving original document order.
     Replaces sequences of removed chunks with '...'.
     """
+    EMBED_MODEL = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
     if not chunks:
         return []
 
@@ -29,12 +29,12 @@ def cosine_filter(chunks: list[str], query: str, threshold: float = 0.30) -> lis
 
     return final_content
 
-CROSS_MODEL = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 def filter_with_cross_encoder(chunks: list[str], query: str, top_k: int = 8, threshold: float = -8.0):
     """
     Selects top-k most relevant chunks based on Cross-Encoder logits, 
     but returns them in their original order with '...' for gaps.
     """
+    CROSS_MODEL = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
     if not chunks:
         return []
 
