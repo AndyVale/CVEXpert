@@ -9,7 +9,7 @@ from langchain_openai import OpenAIEmbeddings
 
 
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN, OPEN_BUTTON_TOKEN2, VAST_IP_PORT, VAST_IP_PORT2
+from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT, VAST_IP_EMBEDDING
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
@@ -25,14 +25,14 @@ if __name__ == "__main__":
     NUMBER_OF_EVALUATIONS = 4
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT}/v1"
-    VAST_HOST2 = f"http://{VAST_IP_PORT2}/v1"
+    VAST_HOST_EMBEDDING = f"http://{VAST_IP_EMBEDDING}/v1"
 
-    print(VAST_HOST, VAST_HOST2)
+    print(VAST_HOST, VAST_HOST_EMBEDDING)
     # Initialize the embedding model externally
     embedding_model_instance = OpenAIEmbeddings(
         model=EMBEDDING_MODEL, 
-        api_key=OPEN_BUTTON_TOKEN2,
-        base_url=VAST_HOST2,
+        api_key=OPEN_BUTTON_TOKEN_EMBEDDING,
+        base_url=VAST_HOST_EMBEDDING,
     )
 
     # Inject the model instance into the node
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     cosine_filter = CosineFilterNode(
         query="What type of vulnerability is it?",
         embed_model=embedding_model_instance,
-        threshold=0.2
+        threshold=0.6
     )
 
     summarizer_llm = init_chat_model(
@@ -86,7 +86,7 @@ if __name__ == "__main__":
         log_dir = os.path.join(os.path.dirname(base_dir), "logs")
         os.makedirs(log_dir, exist_ok=True)
 
-        run_id = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         output_file = os.path.join(log_dir, f"run_{run_id}.json")
 
         log = {
@@ -96,7 +96,7 @@ if __name__ == "__main__":
                 "models": {
                     "chat_model": CHAT_MODEL,
                     "summarizer_model": SUMMARIZER_MODEL,
-                    "embedding_model": "all-MiniLM-L6-v2"
+                    "embedding_model": EMBEDDING_MODEL
                 },
                 "labels_schema": LABELS_DESCRIPTIONS
             },
@@ -117,10 +117,10 @@ if __name__ == "__main__":
             individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
 
             log["cves"][cve] = {
-                # "nvd_description": state.get("nvd_description", ""),
+                "nvd_description": state.get("nvd_description", ""),
                 # "nvd_url_references": state.get("nvd_url_references", []),
-                # "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
-                # "summaries": state.get("summaries", {}), 
+                "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
+                "summaries": state.get("summaries", {}), 
                 "rag_input": state.get("rag", ""),
                 "expected_labels": expected_labels,
                 "classification_output": predicted_labels,
