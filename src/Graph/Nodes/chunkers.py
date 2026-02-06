@@ -1,53 +1,58 @@
 from llama_index.core import Document
 from llama_index.core.node_parser import SemanticSplitterNodeParser
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.core.embeddings import BaseEmbedding
+
 from Graph.state import CVEClassifierState
 
-EMBED_MODEL = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
-
-def semantic_chunker(state: CVEClassifierState) -> CVEClassifierState:
+class SemanticChunkerNode:
     """
-    Splits the extracted text of each reference page into semantic chunks.
+    A LangGraph node that performs semantic chunking via a provided Embedding Model.
 
-    This function iterates through the 'nvd_references_pages' dictionary. For each 
-    page, it uses LlamaIndex's SemanticSplitterNodeParser to divide the text 
-    based on semantic similarity (embedding distance) rather than fixed character 
-    counts. This ensures that topically related sentences stay together.
-
-    Args:
-        state (CVEClassifierState): The current pipeline state containing 
-            'nvd_references_pages'.
-
-    Returns:
-        CVEClassifierState: A new state dictionary with the 'nvd_references_chunks' 
-            field populated. This field maps each URL to its list of semantic 
-            text chunks.
+    This node uses an injected embedding model instance to split text from 
+    'nvd_references_pages' into semantically coherent chunks.
     """
-    pages = state.get("nvd_references_pages", {})
-    
-    chunks_dict = {}
 
-    if not pages:
-        return {**state, "nvd_references_chunks": {}}
+    def __init__(self, embed_model: BaseEmbedding):
+        """
+        Initializes the Semantic Chunker with a pre-configured embedding model.
 
-    splitter = SemanticSplitterNodeParser(
-        buffer_size=1, # Compares each sentence with the next one.
-        breakpoint_percentile_threshold=25, # lower -> more granular splits
-        embed_model=EMBED_MODEL
-    )
+        Args:
+            embed_model (BaseEmbedding): An initialized LlamaIndex embedding model instance.
+        """
+        self.embed_model = embed_model
 
-    for url, text in pages.items():
-        if not text.strip():
-            continue
+    def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        """
+        Executes semantic chunking on all pages in the state.
+        Iterates through the 'nvd_references_pages' dictionary.
+        For each page, it uses LlamaIndex's SemanticSplitterNodeParser 
+        to divide the text based on semantic similarity (embedding distance).
+        """
+        pages = state.get("nvd_references_pages", {})
+        chunks_dict = {}
 
-        try:
-            document = Document(text=text)
-            nodes = splitter.get_nodes_from_documents([document])
-            chunks_dict[url] = [node.get_content() for node in nodes]
-            
-        except Exception as e:
-            print(f"Error chunking content for {url}: {e}")
-            chunks_dict[url] = []
+        if not pages:
+            return {**state,
+                    "nvd_references_chunks": {}}
 
-    return {**state,
-            "nvd_references_chunks": chunks_dict}
+        # The splitter uses the injected embed_model
+        splitter = SemanticSplitterNodeParser(
+            buffer_size=1,
+            breakpoint_percentile_threshold=25,
+            embed_model=self.embed_model
+        )
+
+        for url, text in pages.items():
+            if not text.strip():
+                continue
+
+            try:
+                document = Document(text=text)
+                nodes = splitter.get_nodes_from_documents([document])
+                chunks_dict[url] = [node.get_content() for node in nodes]
+            except Exception as e:
+                print(f"Error during semantic chunking for {url}: {e}")
+                chunks_dict[url] = []
+
+        return {**state,
+                "nvd_references_chunks": chunks_dict}

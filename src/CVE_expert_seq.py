@@ -4,6 +4,7 @@ import json
 import random
 from datetime import datetime
 import langchain_core.runnables as lcr
+from llama_index.embeddings.openai import OpenAIEmbedding
 
 from Definitions.const import CVE_TEST
 from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, OPEN_BUTTON_TOKEN, VAST_IP_PORT
@@ -11,7 +12,7 @@ from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.scrapers import extract_md_trafilatura
-from Graph.Nodes.chunkers import semantic_chunker
+from Graph.Nodes.chunkers import SemanticChunkerNode
 from Graph.Nodes.filters import CosineFilterNode
 from Graph.Nodes.summarizers import ReferenceSummarizerNode
 from Graph.Nodes.evaluators import *
@@ -22,10 +23,21 @@ if __name__ == "__main__":
     NUMBER_OF_EVALUATIONS = 4
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT}/v1"
-    print(OPEN_BUTTON_TOKEN, VAST_IP_PORT)
     
+    # Initialize the embedding model externally
+    embedding_model_instance = OpenAIEmbedding(
+        model="EmbeddingModelName",
+        api_key=OPEN_BUTTON_TOKEN,
+        api_base=VAST_HOST,
+    )
+
+    # Inject the model instance into the node
+    semantic_chunker = SemanticChunkerNode(
+        embed_model=embedding_model_instance
+    )
+
     cosine_filter = CosineFilterNode(
-        query="What type of vulnerability is it? Technical details and exploit root cause.",
+        query="What type of vulnerability is it?",
         model_name="sentence-transformers/all-MiniLM-L6-v2",
         threshold=0.3
     )
