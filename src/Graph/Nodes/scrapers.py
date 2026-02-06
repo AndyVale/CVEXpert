@@ -1,7 +1,10 @@
 import trafilatura
 import random
+from tqdm import tqdm
 from Graph.state import CVEClassifierState
-from Definitions.config import REF_MAX 
+from Definitions.config import REF_MAX
+
+
 def extract_main_text_from_url(url: str) -> str:
     """
     Fetch a URL and extract only the main meaningful text content using Trafilatura.
@@ -40,7 +43,7 @@ def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
     random.shuffle(url_refs)
     
     pages_dict = {}
-    for url_ref in url_refs:
+    for url_ref in tqdm(url_refs, "Extracting references"):
         try:
             downloaded = trafilatura.fetch_url(url_ref)
             text = trafilatura.extract(downloaded, output_format="markdown", favor_recall=True)
@@ -56,18 +59,3 @@ def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
 
     return {**state,
             "nvd_references_pages": pages_dict}
-
-
-def get_filtered_content_from_url(url: str, similarity_query, filter_parameter, filter_function): # TODO: REMOVE THIS FUNCTION
-    """
-    Wrapper function to call extract_main_text_from_url->get_semantic_chunks->filter_relevant_chunks
-    """
-    from Graph.Nodes.chunkers import semantic_chunker
-    main_text = extract_main_text_from_url(url)
-    if not main_text:
-        return [],[]
-    
-    chunks = semantic_chunker(main_text)
-    filtered_chunks = filter_function(chunks, similarity_query, filter_parameter)
-
-    return filtered_chunks, chunks

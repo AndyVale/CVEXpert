@@ -18,10 +18,10 @@ def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
     Raises:
         requests.exceptions.HTTPError: If the NVD API request fails (status code != 200).
     """
+    print("Contacting NVD API")
     cve_id = state["cve_id"]
     url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     params = {"cveId": cve_id}
-
     resp = requests.get(url, params=params, timeout=20)
 
     resp.raise_for_status()

@@ -1,4 +1,4 @@
-import json
+from tqdm import tqdm
 from langchain.chat_models import init_chat_model
 from Graph.state import CVEClassifierState
 
@@ -112,13 +112,13 @@ EXTRACTED TEXT TO ANALYZE:
         if not filtered_chunks_dict:
             return {**state, "summaries": {}}
 
-        for url, chunks in filtered_chunks_dict.items():
+        for url, chunks in tqdm(filtered_chunks_dict.items(), "Summarizing filtered chunks"):
             if all([c == "..." for c in chunks]):
                 continue
 
             text_to_analyze = "\n\n".join(chunks).strip()
 
-            print(f"Summarizing reference: {url}...")
+            # print(f"Summarizing reference: {url}...")
             
             try:
                 response = self.struct_model.invoke(self._get_prompt(text_to_analyze))
@@ -126,7 +126,7 @@ EXTRACTED TEXT TO ANALYZE:
                 if response and response.get("is_cve_related") and response.get("summary"):
                     summaries_dict[url] = response["summary"].strip()
 
-                print("Summarization completed")
+                # print("Summarization completed")
                 
             except Exception as e:
                 print(f"Error during structured summarization for {url}: {e}")

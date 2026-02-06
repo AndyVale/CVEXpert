@@ -1,8 +1,7 @@
 # Core LLM / orchestration
 langchain>=0.1
 langchain-openai
-llama-index-core
-llama-index-embeddings-huggingface
+langchain_experimental
 
 # Text extraction / parsing
 trafilatura>=1.0

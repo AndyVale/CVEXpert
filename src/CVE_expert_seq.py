@@ -4,10 +4,10 @@ import json
 import random
 from datetime import datetime
 import langchain_core.runnables as lcr
-from llama_index.embeddings.openai import OpenAIEmbedding
+from langchain_openai import OpenAIEmbeddings
 
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, OPEN_BUTTON_TOKEN, VAST_IP_PORT
+from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN, OPEN_BUTTON_TOKEN2, VAST_IP_PORT, VAST_IP_PORT2
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
@@ -23,12 +23,14 @@ if __name__ == "__main__":
     NUMBER_OF_EVALUATIONS = 4
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT}/v1"
-    
+    VAST_HOST2 = f"http://{VAST_IP_PORT2}/v1"
+
+    print(VAST_HOST, VAST_HOST2)
     # Initialize the embedding model externally
-    embedding_model_instance = OpenAIEmbedding(
-        model="EmbeddingModelName",
-        api_key=OPEN_BUTTON_TOKEN,
-        api_base=VAST_HOST,
+    embedding_model_instance = OpenAIEmbeddings(
+        model=EMBEDDING_MODEL, 
+        api_key=OPEN_BUTTON_TOKEN2,
+        base_url=VAST_HOST2,
     )
 
     # Inject the model instance into the node
@@ -39,7 +41,7 @@ if __name__ == "__main__":
     cosine_filter = CosineFilterNode(
         query="What type of vulnerability is it?",
         embed_model=embedding_model_instance,
-        threshold=0.3
+        threshold=0.2
     )
 
     summarizer = ReferenceSummarizerNode(

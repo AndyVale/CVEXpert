@@ -1,7 +1,5 @@
+from tqdm import tqdm
 import numpy as np
-from sentence_transformers import CrossEncoder
-from llama_index.core.embeddings import BaseEmbedding
-
 from Graph.state import CVEClassifierState
 
 class CosineFilterNode:
@@ -13,28 +11,28 @@ class CosineFilterNode:
     to indicate gaps where content was removed.
 
     Attributes:
-        embed_model (BaseEmbedding): The embedding model used for vectorization.
+        embed_model: The LangChain embedding model used for vectorization.
         query (str): The semantic query used as a reference for relevance.
         threshold (float): The similarity score (0.0 to 1.0) below which chunks are discarded.
     """
 
     def __init__(self, 
-                 embed_model: BaseEmbedding,
+                 embed_model,
                  query: str, 
                  threshold: float = 0.30):
         """
-        Initializes the CosineFilterNode with a pre-configured embedding model.
+        Initializes the CosineFilterNode.
 
         Args:
-            embed_model (BaseEmbedding): An initialized embedding model instance.
+            embed_model: A LangChain Embeddings object.
             query (str): The text description of what constitutes "relevant" content.
             threshold (float): Minimum cosine similarity score to keep a chunk.
         """
         self.embed_model = embed_model
         self.query = query
         self.threshold = threshold
-        # Pre-compute query embedding once to save time during execution
-        self.query_embedding = np.array(self.embed_model.get_query_embedding(query))
+        # Pre-compute query embedding once using LangChain's embed_query method
+        self.query_embedding = np.array(self.embed_model.embed_query(query))
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
@@ -52,13 +50,13 @@ class CosineFilterNode:
         if not references_chunks:
              return {**state, "nvd_filtered_chunks": {}}
 
-        for url, chunks in references_chunks.items():
+        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
             if not chunks:
                 filtered_results[url] = []
                 continue
 
-            # Vectorize chunks
-            chunk_embeddings = np.array(self.embed_model.get_text_embedding_batch(chunks))
+            # Vectorize chunks using LangChain's embed_documents method
+            chunk_embeddings = np.array(self.embed_model.embed_documents(chunks))
             
             # Calculate Cosine Similarity (Dot product of normalized vectors)
             similarities = np.dot(chunk_embeddings, self.query_embedding)
@@ -90,14 +88,14 @@ class CrossEncoderFilterNode:
     while preserving the original narrative flow and inserting "..." for gaps.
 
     Attributes:
-        cross_model (CrossEncoder): The model used to score query-chunk pairs.
+        cross_model: The model used to score query-chunk pairs.
         query (str): The question or description used to evaluate chunk relevance.
         top_k (int): The maximum number of chunks to keep per reference.
         threshold (float): The minimum logit score required to keep a chunk.
     """
 
     def __init__(self, 
-                 cross_model: CrossEncoder,
+                 cross_model,
                  query: str, 
                  top_k: int = 8, 
                  threshold: float = -8.0):
@@ -105,7 +103,7 @@ class CrossEncoderFilterNode:
         Initializes the CrossEncoderFilterNode with a pre-configured model.
 
         Args:
-            cross_model (CrossEncoder): An initialized CrossEncoder model instance.
+            cross_model: An initialized CrossEncoder model instance.
             query (str): The relevance query.
             top_k (int): Number of top-scoring chunks to retain.
             threshold (float): Logit threshold to filter noise.
@@ -131,7 +129,7 @@ class CrossEncoderFilterNode:
         if not references_chunks:
             return {**state, "nvd_filtered_chunks": {}}
 
-        for url, chunks in references_chunks.items():
+        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using CrossEncoder"):
             if not chunks:
                 filtered_results[url] = []
                 continue
