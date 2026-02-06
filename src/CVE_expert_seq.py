@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
     cosine_filter = CosineFilterNode(
         query="What type of vulnerability is it?",
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        embed_model=embedding_model_instance,
         threshold=0.3
     )
 

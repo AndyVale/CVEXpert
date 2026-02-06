@@ -1,6 +1,6 @@
 import numpy as np
 from sentence_transformers import CrossEncoder
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.core.embeddings import BaseEmbedding
 
 from Graph.state import CVEClassifierState
 
@@ -8,30 +8,29 @@ class CosineFilterNode:
     """
     A LangGraph node that filters text chunks based on semantic similarity (Cosine Similarity).
 
-    This class initializes a HuggingFace embedding model once and uses it to filter
-    irrelevant chunks from the pipeline state. It preserves the original order of the 
-    document and inserts a "..." placeholder to indicate gaps where content was removed.
+    This class uses an injected embedding model to filter irrelevant chunks from the pipeline state. 
+    It preserves the original order of the document and inserts a "..." placeholder 
+    to indicate gaps where content was removed.
 
     Attributes:
-        embed_model (HuggingFaceEmbedding): The embedding model used for vectorization.
+        embed_model (BaseEmbedding): The embedding model used for vectorization.
         query (str): The semantic query used as a reference for relevance.
         threshold (float): The similarity score (0.0 to 1.0) below which chunks are discarded.
     """
 
     def __init__(self, 
+                 embed_model: BaseEmbedding,
                  query: str, 
-                 model_name: str = "sentence-transformers/all-MiniLM-L6-v2", 
                  threshold: float = 0.30):
         """
-        Initializes the CosineFilterNode.
+        Initializes the CosineFilterNode with a pre-configured embedding model.
 
         Args:
+            embed_model (BaseEmbedding): An initialized embedding model instance.
             query (str): The text description of what constitutes "relevant" content.
-            model_name (str): The HuggingFace model hub name for embeddings.
             threshold (float): Minimum cosine similarity score to keep a chunk.
         """
-        print(f"Loading Embedding Model: {model_name}...")
-        self.embed_model = HuggingFaceEmbedding(model_name=model_name)
+        self.embed_model = embed_model
         self.query = query
         self.threshold = threshold
         # Pre-compute query embedding once to save time during execution
@@ -98,21 +97,20 @@ class CrossEncoderFilterNode:
     """
 
     def __init__(self, 
+                 cross_model: CrossEncoder,
                  query: str, 
-                 model_name: str = 'cross-encoder/ms-marco-MiniLM-L-6-v2', 
                  top_k: int = 8, 
                  threshold: float = -8.0):
         """
-        Initializes the CrossEncoderFilterNode.
+        Initializes the CrossEncoderFilterNode with a pre-configured model.
 
         Args:
-            query (str): The relevance query (best phrased as a question for MS-MARCO models).
-            model_name (str): The HuggingFace Cross-Encoder model name.
+            cross_model (CrossEncoder): An initialized CrossEncoder model instance.
+            query (str): The relevance query.
             top_k (int): Number of top-scoring chunks to retain.
-            threshold (float): Logit threshold (usually negative for MS-MARCO) to filter noise.
+            threshold (float): Logit threshold to filter noise.
         """
-        print(f"Loading Cross-Encoder Model: {model_name}...")
-        self.cross_model = CrossEncoder(model_name)
+        self.cross_model = cross_model
         self.query = query
         self.top_k = top_k
         self.threshold = threshold
@@ -145,7 +143,6 @@ class CrossEncoderFilterNode:
             logits = self.cross_model.predict(pairs)
             
             # Identify indices of the top_k chunks that also meet the absolute threshold
-            # We define importance by score, but we need to retrieve them by original index
             indexed_scores = sorted(enumerate(logits), key=lambda x: x[1], reverse=True)
             
             # Create a set of indices to keep (Logic: Top K AND > Threshold)
