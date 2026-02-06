@@ -3,8 +3,10 @@ import json
 
 import random
 from datetime import datetime
+from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
+
 
 from Definitions.const import CVE_TEST
 from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN, OPEN_BUTTON_TOKEN2, VAST_IP_PORT, VAST_IP_PORT2
@@ -44,10 +46,15 @@ if __name__ == "__main__":
         threshold=0.2
     )
 
-    summarizer = ReferenceSummarizerNode(
-        model_name=SUMMARIZER_MODEL,
+    summarizer_llm = init_chat_model(
+        model=SUMMARIZER_MODEL,
+        model_provider="openai",
         api_key=OPEN_BUTTON_TOKEN,
         base_url=VAST_HOST,
+    )
+
+    summarizer = ReferenceSummarizerNode(
+        model=summarizer_llm,
         labels_descriptions=LABELS_DESCRIPTIONS,
     )
 

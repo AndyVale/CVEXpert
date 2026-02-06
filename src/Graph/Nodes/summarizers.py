@@ -1,5 +1,4 @@
 from tqdm import tqdm
-from langchain.chat_models import init_chat_model
 from Graph.state import CVEClassifierState
 
 class ReferenceSummarizerNode:
@@ -12,33 +11,21 @@ class ReferenceSummarizerNode:
     on features useful for classification.
 
     Attributes:
-        model: The structured LLM instance used for summarization.
+        model: The LLM instance used for summarization (without structured output).
         labels_descriptions (dict): A mapping of security labels to their descriptions 
             used to guide the summarization focus.
     """
 
     def __init__(self, 
-                 model_name: str, 
-                 api_key: str, 
-                 base_url: str, 
+                 model, 
                  labels_descriptions: dict):
         """
-        Initializes the ReferenceSummarizerNode.
+        Initializes the ReferenceSummarizerNode with a pre-initialized LLM.
 
         Args:
-            model_name (str): Name of the model to use (e.g., Phi-4, Qwen).
-            api_key (str): Authentication token for the LLM provider.
-            base_url (str): The base URL for the LLM API.
+            model: A LangChain chat model instance (e.g., initialized via init_chat_model).
             labels_descriptions (dict): Dictionary of classification labels to include in the prompt.
         """
-
-        llm = init_chat_model(
-            model=model_name,
-            model_provider="openai",
-            api_key=api_key,
-            base_url=base_url,
-        )
-
         # Define the JSON schema for structured output
         self.json_schema = {
             "title": "cve_summarizer_output",
@@ -51,8 +38,8 @@ class ReferenceSummarizerNode:
             "required": ["is_cve_related", "summary"]
         }
 
-        # Bind the structured output to the model
-        self.struct_model = llm.with_structured_output(self.json_schema)
+        # Bind the structured output to the provided model instance
+        self.struct_model = model.with_structured_output(self.json_schema)
         self.labels_descriptions = labels_descriptions
 
     def _get_prompt(self, text: str) -> str:
