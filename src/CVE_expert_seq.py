@@ -58,12 +58,17 @@ if __name__ == "__main__":
         labels_descriptions=LABELS_DESCRIPTIONS,
     )
 
-    classifier = CVEClassifierNode(
-        model_name=CHAT_MODEL,
+    classifier_llm = init_chat_model(
+        model=CHAT_MODEL,
+        model_provider="openai",
         api_key=OPEN_BUTTON_TOKEN,
         base_url=VAST_HOST,
         temperature=CHAT_MODEL_TEMP,
-        labels_descriptions=LABELS_DESCRIPTIONS
+    )
+
+    classifier = CVEClassifierNode(
+        model=classifier_llm,
+        labels_descriptions=LABELS_DESCRIPTIONS,
     )
 
     pipeline = (

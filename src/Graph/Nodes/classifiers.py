@@ -16,32 +16,18 @@ class CVEClassifierNode:
     """
 
     def __init__(self, 
-                 model_name: str, 
-                 api_key: str, 
-                 base_url: str, 
-                 temperature: float, 
+                 model, 
                  labels_descriptions: dict):
         """
-        Initializes the CVEClassifierNode.
+        Initializes the CVEClassifierNode with a pre-initialized LLM.
 
         Args:
-            model_name (str): Name of the classification model.
-            api_key (str): API key for the model provider.
-            base_url (str): Base URL for the LLM API.
-            temperature (float): Sampling temperature for the model.
+            model: The LLM instance used for classification (without structured output).
             labels_descriptions (dict): Definitions of the security labels.
         """
         self.labels_descriptions = labels_descriptions
         # Generate the list of allowed strings for the JSON enum validation
         self.all_labels = list(labels_descriptions.keys()) + ["NONE"]
-
-        chat_model = init_chat_model(
-            model=model_name,
-            model_provider="openai",
-            api_key=api_key,
-            base_url=base_url,
-            temperature=temperature,
-        )
 
         # Define the structured output schema with enum constraints
         output_schema = {
@@ -60,8 +46,8 @@ class CVEClassifierNode:
             "required": ["labels"],
         }
 
-        # Bind the schema to the model once
-        self.struct_model = chat_model.with_structured_output(output_schema)
+        # Bind the schema to the provided model instance
+        self.struct_model = model.with_structured_output(output_schema)
 
     def _get_prompt(self, cve_id: str, rag_content: str) -> str:
         """Constructs the classification prompt with hierarchical context."""
