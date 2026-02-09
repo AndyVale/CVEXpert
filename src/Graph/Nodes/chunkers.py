@@ -16,7 +16,7 @@ class RecursiveCharacterChunkerNode:
     def __init__(self, 
                  chunk_size: int = 1000, 
                  chunk_overlap: int = 100, 
-                 separators: list[str] = None):
+                 separators: list[str] = ["\n\n", "\n", ". ", " ", ""]):
         """
         Initializes the Recursive Character Chunker.
 
@@ -29,8 +29,7 @@ class RecursiveCharacterChunkerNode:
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        # Standard priority: Paragraphs -> Newlines -> Sentences -> Words
-        self.separators = separators or ["\n\n", "\n", ". ", " ", ""]
+        self.separators = separators
         
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
@@ -78,7 +77,7 @@ class MarkdownChunkerNode:
     technical documents.
     """
 
-    def __init__(self, headers_to_split_on: list[tuple[str, str]] = None):
+    def __init__(self, headers_to_split_on: list[tuple[str, str]] = [("#", "Header 1"),("##", "Header 2"),("###", "Header 3"),]):
         """
         Initializes the Markdown Chunker.
 
@@ -86,12 +85,7 @@ class MarkdownChunkerNode:
             headers_to_split_on: A list of tuples containing the markdown symbol 
                 and the header name (e.g., [("#", "Header 1"), ("##", "Header 2")]).
         """
-        # Default headers if none provided
-        self.headers_to_split_on = headers_to_split_on or [
-            ("#", "Header 1"),
-            ("##", "Header 2"),
-            ("###", "Header 3"),
-        ]
+        self.headers_to_split_on = headers_to_split_on
         self.splitter = MarkdownHeaderTextSplitter(
             headers_to_split_on=self.headers_to_split_on,
             strip_headers=False # Keeping headers helps LLMs understand context
