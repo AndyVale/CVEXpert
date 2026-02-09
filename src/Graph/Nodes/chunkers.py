@@ -1,7 +1,73 @@
 from tqdm import tqdm
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain_text_splitters import MarkdownHeaderTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from Graph.state import CVEClassifierState
+
+class RecursiveCharacterChunkerNode:
+    """
+    A LangGraph node that performs text splitting based on recursive character sequencing.
+
+    This node splits Markdown text from 'nvd_references_pages' into chunks of a 
+    specific size. it uses a sequence of separators (e.g., newlines, periods, spaces) 
+    to find the best places to break the text, maintaining structural continuity 
+    where possible.
+    """
+
+    def __init__(self, 
+                 chunk_size: int = 1000, 
+                 chunk_overlap: int = 100, 
+                 separators: list[str] = None):
+        """
+        Initializes the Recursive Character Chunker.
+
+        Args:
+            chunk_size: The maximum number of characters per chunk.
+            chunk_overlap: The number of characters to overlap between adjacent chunks 
+                to preserve context.
+            separators: A list of strings to use as splitting delimiters in order of 
+                priority. Defaults to paragraphs, newlines, sentences, and spaces.
+        """
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        # Standard priority: Paragraphs -> Newlines -> Sentences -> Words
+        self.separators = separators or ["\n\n", "\n", ". ", " ", ""]
+        
+        self.splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            separators=self.separators
+        )
+
+    def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        """
+        Executes recursive character splitting on all pages stored in the state.
+
+        Args:
+            state (CVEClassifierState): The current pipeline state.
+
+        Returns:
+            CVEClassifierState: Updated state with chunks mapped by URL.
+        """
+        pages = state.get("nvd_references_pages", {})
+        chunks_dict = {}
+
+        if not pages:
+            return {**state, "nvd_references_chunks": {}}
+
+        for url, text in tqdm(pages.items(), "Recursive splitting pages"):
+            if not text or not text.strip():
+                continue
+
+            try:
+                # split_text returns a list of strings
+                chunks = self.splitter.split_text(text)
+                chunks_dict[url] = chunks
+            except Exception as e:
+                print(f"Error during recursive character chunking for {url}: {e}")
+                chunks_dict[url] = []
+
+        return {**state,
+                "nvd_references_chunks": chunks_dict}
 
 class MarkdownChunkerNode:
     """
