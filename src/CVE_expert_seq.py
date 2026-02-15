@@ -1,12 +1,12 @@
 import os
 import json
-
 import random
 from datetime import datetime
+import concurrent.futures
+
 from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
-
 
 from Definitions.const import CVE_TEST
 from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT, VAST_IP_EMBEDDING
@@ -21,13 +21,90 @@ from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 
+def run_evaluation(args):
+    """
+    Worker function to run a single evaluation iteration.
+    Unpacks arguments to allow usage with ThreadPoolExecutor.map.
+    """
+    RUN_N, pipeline_instance = args
+    
+    # Setup paths inside the thread
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(os.path.dirname(base_dir), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Unique filename per iteration
+    run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_file = os.path.join(log_dir, f"run_{run_id}", f"run_{run_id}_iter_{RUN_N}.json")
+
+    print(f"[Run {RUN_N}] Starting. Log: {os.path.basename(output_file)}")
+
+    log = {
+        "pipeline_metadata": {
+            "run_id": run_id,
+            "iteration": RUN_N + 1,
+            "models": {
+                "chat_model": CHAT_MODEL,
+                "summarizer_model": SUMMARIZER_MODEL,
+                "embedding_model": EMBEDDING_MODEL
+            },
+            "labels_schema": LABELS_DESCRIPTIONS
+        },
+        "cves": {},
+        "aggregated_scores": {}
+    }
+
+    all_y_true = []
+    all_y_pred = []
+
+    for cve, expected_labels in CVE_TEST.items():
+        print(f"[Iter {RUN_N}] --- Analyzing {cve} ---")
+        
+        # Invoke the pipeline
+        state = pipeline_instance.invoke({"cve_id": cve})
+        
+        predicted_labels = state["cve_labels"]
+
+        individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
+
+        log["cves"][cve] = {
+            "nvd_description": state.get("nvd_description", ""),
+            "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
+            "summaries": state.get("summaries", {}), 
+            "rag_input": state.get("rag", ""),
+            "expected_labels": expected_labels,
+            "classification_output": predicted_labels,
+            "individual_scores": individual_scores
+        }
+
+        # --- KEY REQUIREMENT: Log update inside the loop ---
+        # This saves the file after every single CVE is processed
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(log, f, indent=2)
+
+        print(f"[Iter {RUN_N}] Log updated for {cve}")
+        
+        all_y_true.append(expected_labels)
+        all_y_pred.append(predicted_labels)
+
+    # Final aggregation after all CVEs in this iteration are done
+    grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_LABELS)
+    log["aggregated_scores"] = grouped_scores
+    
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(log, f, indent=2)
+
+    print(f"\n[Iter {RUN_N}] Evaluation Run completed.\nFinal log file: {os.path.abspath(output_file)}")
+
 if __name__ == "__main__":
-    NUMBER_OF_EVALUATIONS = 4
+    NUMBER_OF_EVALUATIONS = 10
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT}/v1"
     VAST_HOST_EMBEDDING = f"http://{VAST_IP_EMBEDDING}/v1"
 
-    print(VAST_HOST, VAST_HOST_EMBEDDING)
+    print(f"Chat Host: {VAST_HOST}")
+    print(f"Embedding Host: {VAST_HOST_EMBEDDING}")
+
     # Initialize the embedding model externally
     embedding_model_instance = OpenAIEmbeddings(
         model=EMBEDDING_MODEL, 
@@ -81,65 +158,11 @@ if __name__ == "__main__":
         | classifier
     )
 
-    for i in range(NUMBER_OF_EVALUATIONS):
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        log_dir = os.path.join(os.path.dirname(base_dir), "logs")
-        os.makedirs(log_dir, exist_ok=True)
+    print(f"Starting {NUMBER_OF_EVALUATIONS} evaluations in parallel...")
+    
+    # Prepare arguments: list of (iteration_index, pipeline_object)
+    # We pass the pipeline object to the worker function
+    tasks = [(i, pipeline) for i in range(NUMBER_OF_EVALUATIONS)]
 
-        run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        output_file = os.path.join(log_dir, f"run_{run_id}.json")
-
-        log = {
-            "pipeline_metadata": {
-                "run_id": run_id,
-                "iteration": i + 1,
-                "models": {
-                    "chat_model": CHAT_MODEL,
-                    "summarizer_model": SUMMARIZER_MODEL,
-                    "embedding_model": EMBEDDING_MODEL
-                },
-                "labels_schema": LABELS_DESCRIPTIONS
-            },
-            "cves": {},
-            "aggregated_scores": {}
-        }
-
-        all_y_true = []
-        all_y_pred = []
-
-        for cve, expected_labels in CVE_TEST.items():
-            print(f"--- Analyzing {cve} ---")
-            
-            state = pipeline.invoke({"cve_id": cve})
-            
-            predicted_labels = state["cve_labels"]
-
-            individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
-
-            log["cves"][cve] = {
-                "nvd_description": state.get("nvd_description", ""),
-                # "nvd_url_references": state.get("nvd_url_references", []),
-                "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
-                "summaries": state.get("summaries", {}), 
-                "rag_input": state.get("rag", ""),
-                "expected_labels": expected_labels,
-                "classification_output": predicted_labels,
-                "individual_scores": individual_scores
-            }
-
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(log, f, indent=2)
-
-            print(f"Log {os.path.abspath(output_file)} updated for {cve}")
-            
-            all_y_true.append(expected_labels)
-            all_y_pred.append(predicted_labels)
-
-        grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_LABELS)
-        log["aggregated_scores"] = grouped_scores
-        
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(log, f, indent=2)
-
-        print(f"\nEvaluation Run {run_id} completed.")
-        print(f"Final log file: {os.path.abspath(output_file)}")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=NUMBER_OF_EVALUATIONS) as executor:
+        executor.map(run_evaluation, tasks)

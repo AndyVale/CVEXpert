@@ -6,6 +6,7 @@ langchain_experimental
 # Text extraction / parsing
 trafilatura>=1.0
 lxml[html_clean]>=4.9.2
+lxml_html_clean
 
 # Embeddings / transformers
 sentence-transformers>=2.3.0
