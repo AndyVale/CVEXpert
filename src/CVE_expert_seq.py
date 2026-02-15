@@ -16,7 +16,7 @@ from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.scrapers import extract_md_trafilatura
 from Graph.Nodes.chunkers import SemanticChunkerNode
 from Graph.Nodes.filters import CosineFilterNode
-from Graph.Nodes.summarizers import ReferenceSummarizerNode
+from Graph.Nodes.summarizers import ReferenceSummarizerNode, NoSummarizerNode
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
@@ -31,10 +31,11 @@ def run_evaluation(args):
     # Setup paths inside the thread
     base_dir = os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
-    os.makedirs(log_dir, exist_ok=True)
 
-    # Unique filename per iteration
+    # Unique filename per run
     run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    os.makedirs(os.path.join(log_dir, f"run_{run_id}"), exist_ok=True)
     output_file = os.path.join(log_dir, f"run_{run_id}", f"run_{run_id}_iter_{RUN_N}.json")
 
     print(f"[Run {RUN_N}] Starting. Log: {os.path.basename(output_file)}")
@@ -42,7 +43,7 @@ def run_evaluation(args):
     log = {
         "pipeline_metadata": {
             "run_id": run_id,
-            "iteration": RUN_N + 1,
+            "RUN_N": RUN_N + 1,
             "models": {
                 "chat_model": CHAT_MODEL,
                 "summarizer_model": SUMMARIZER_MODEL,
@@ -97,7 +98,7 @@ def run_evaluation(args):
     print(f"\n[Iter {RUN_N}] Evaluation Run completed.\nFinal log file: {os.path.abspath(output_file)}")
 
 if __name__ == "__main__":
-    NUMBER_OF_EVALUATIONS = 10
+    NUMBER_OF_EVALUATIONS = 2
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT}/v1"
     VAST_HOST_EMBEDDING = f"http://{VAST_IP_EMBEDDING}/v1"
@@ -130,10 +131,11 @@ if __name__ == "__main__":
         base_url=VAST_HOST,
     )
 
-    summarizer = ReferenceSummarizerNode(
-        model=summarizer_llm,
-        labels_descriptions=LABELS_DESCRIPTIONS,
-    )
+    summarizer = NoSummarizerNode() 
+    #ReferenceSummarizerNode(
+    #    model=summarizer_llm,
+    #    labels_descriptions=LABELS_DESCRIPTIONS,
+    #)
 
     classifier_llm = init_chat_model(
         model=CHAT_MODEL,

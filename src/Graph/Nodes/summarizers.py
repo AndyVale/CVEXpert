@@ -121,3 +121,50 @@ EXTRACTED TEXT TO ANALYZE:
 
         return {**state,
                 "summaries": summaries_dict}
+
+class NoSummarizerNode:
+    """
+    A LangGraph node that substitutes the summarizer; it executes no LLM summarization.
+    
+    The purpose of this node is to conduct ablation studies (testing the pipeline 
+    without the summarization step) while maintaining the exact same state structure 
+    and data flow. It simply concatenates the filtered chunks into a single string 
+    per reference.
+    """
+
+    def __init__(self):
+        """
+        Initializes the node. No model or configuration is required.
+        """
+        pass
+
+    def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        """
+        Processes the state by concatenating filtered chunks for each reference.
+
+        Args:
+            state (CVEClassifierState): The current pipeline state.
+
+        Returns:
+            CVEClassifierState: Updated state with the 'summaries' dictionary populated
+            with raw concatenated text instead of LLM-generated summaries.
+        """
+        filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
+        summaries_dict = {}
+
+        if not filtered_chunks_dict:
+            return {**state, "summaries": {}}
+
+        for url, chunks in filtered_chunks_dict.items():
+
+            valid_chunks = [c for c in chunks if c != "..."]
+            if not valid_chunks:
+                continue
+            
+            concatenated_text = "\n\n".join(valid_chunks).strip()
+            
+            if concatenated_text:
+                summaries_dict[url] = concatenated_text
+
+        return {**state,
+                "summaries": summaries_dict}
