@@ -12,9 +12,9 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv(".env")
-VAST_IP_PORT = os.getenv('VAST_IP_PORT')
-VAST_IP_EMBEDDING = os.getenv('VAST_IP_EMBEDDING')
+VAST_IP_PORT_MODEL = os.getenv('VAST_IP_PORT_MODEL')
+VAST_IP_PORT_EMBEDDING = os.getenv('VAST_IP_PORT_EMBEDDING')
 
-OPEN_BUTTON_TOKEN = os.getenv('OPEN_BUTTON_TOKEN')
+OPEN_BUTTON_TOKEN_MODEL = os.getenv('OPEN_BUTTON_TOKEN_MODEL')
 OPEN_BUTTON_TOKEN_EMBEDDING = os.getenv('OPEN_BUTTON_TOKEN_EMBEDDING')
 
