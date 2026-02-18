@@ -4,23 +4,6 @@ from tqdm import tqdm
 from Graph.state import CVEClassifierState
 from Definitions.config import REF_MAX
 
-
-def extract_main_text_from_url(url: str) -> str:
-    """
-    Fetch a URL and extract only the main meaningful text content using Trafilatura.
-    """
-    try:
-        downloaded = trafilatura.fetch_url(url)
-        if downloaded is None:
-            return ""
-        
-        text = trafilatura.extract(downloaded, output_format="markdown", favor_recall=True)
-        if text is None:
-            return ""
-        return text
-    except Exception:
-        return ""
-
 def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
     """
     Fetches and extracts Markdown content from NVD reference URLs using Trafilatura.
