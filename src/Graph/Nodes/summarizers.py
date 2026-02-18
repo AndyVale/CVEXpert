@@ -122,6 +122,136 @@ EXTRACTED TEXT TO ANALYZE:
         return {**state,
                 "summaries": summaries_dict}
 
+class CVEAwareSummarizerNode:
+    """
+    A LangGraph node that summarizes filtered technical chunks for each reference URL,
+    using the specific CVE ID and NVD description as context to filter relevance.
+
+    This node iterates through 'nvd_filtered_chunks'. For each reference, it uses 
+    the official NVD description to verify if the content matches the specific 
+    vulnerability. It generates a summary only if the content is semantically 
+    aligned with the provided CVE context.
+
+    Attributes:
+        struct_model: The LLM instance with structured output binding.
+        labels_descriptions (dict): A mapping of security labels to guide focus.
+    """
+
+    def __init__(self, 
+                 model, 
+                 labels_descriptions: dict):
+        """
+        Initializes the CVEAwareSummarizerNode with a pre-initialized LLM.
+
+        Args:
+            model: A LangChain chat model instance.
+            labels_descriptions (dict): Dictionary of classification labels.
+        """
+        # Define the JSON schema for structured output
+        self.json_schema = {
+            "title": "cve_summarizer_output",
+            "description": "Schema for summarizing CVE related texts",
+            "type": "object",
+            "properties": {
+                "is_cve_related": {"type": "boolean"},
+                "summary": {"type": "string"}
+            },
+            "required": ["is_cve_related", "summary"]
+        }
+
+        # Bind the structured output to the provided model instance
+        self.struct_model = model.with_structured_output(self.json_schema)
+        self.labels_descriptions = labels_descriptions
+
+    def _get_prompt(self, text: str, cve_id: str, nvd_description: str) -> str:
+        """
+        Constructs a prompt that grounds the summarization in the specific CVE context.
+        """
+        labels_str = '\n'.join([f"* {k}: {v}" for k, v in self.labels_descriptions.items()])
+        
+        return f"""
+You are a specialized cybersecurity analyst. Your task is to extract technical details from a set of text fragments found on a webpage referenced by the National Vulnerability Database.
+
+TARGET VULNERABILITY:
+- **CVE ID**: {cve_id}
+- **Official Description**: {nvd_description}
+
+YOUR GOAL:
+Determine if the provided text fragments describe THIS specific vulnerability ({cve_id}). If they do, summarize the technical details found *in the fragments* that are not already obvious, focusing on information helpful for classification.
+
+TARGET CLASSIFICATION LABELS:
+{labels_str}
+
+INPUT CONTEXT:
+- The text below contains snippets extracted from a webpage.
+- The symbol "..." indicates gaps where irrelevant content was removed.
+
+INSTRUCTIONS:
+1. **Verification**: Compare the text fragments against the "Official Description". 
+   - If the text talks about a different CVE, a different software, or is just a general homepage/login screen, set `is_cve_related` to False.
+   - If the text matches {cve_id}, set `is_cve_related` to True.
+
+2. **Summarization** (Only if related):
+   - Extract specific technical details: affected versions, root cause (e.g., "heap overflow in function X"), exploit vectors, and impact.
+   - Do NOT just repeat the NVD description. Look for *additional* technical depth in the fragments.
+   - Ignore the "..." gaps. Bridge the fragments into a cohesive technical summary.
+   - Use a professional, dry, technical tone (3-6 sentences).
+
+OUTPUT FORMAT:
+Return a JSON object with:
+- `is_cve_related`: (boolean) True ONLY if the text explicitly discusses {cve_id}.
+- `summary`: (string) The technical summary.
+
+EXTRACTED TEXT TO ANALYZE:
+---
+{text}
+---
+"""
+
+    def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        """
+        Processes the state by summarizing each reference's filtered chunks,
+        using the CVE ID and Description as a relevance filter.
+
+        Args:
+            state (CVEClassifierState): The current pipeline state.
+
+        Returns:
+            CVEClassifierState: Updated state with the 'summaries' dictionary populated.
+        """
+        filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
+        summaries_dict = {}
+        
+        # Extract context from state
+        cve_id = state["cve_id"]
+        nvd_description = state["nvd_description"]
+
+        if not filtered_chunks_dict:
+            return {**state, "summaries": {}}
+
+        for url, chunks in tqdm(filtered_chunks_dict.items(), "Summarizing filtered chunks"):
+            # Skip empty or gap-only chunks
+            if not chunks or all(c == "..." for c in chunks):
+                continue
+
+            text_to_analyze = "\n\n".join(chunks).strip()
+            
+            try:
+                # Pass the CVE context to the prompt generator
+                prompt = self._get_prompt(text_to_analyze, cve_id, nvd_description)
+                
+                response = self.struct_model.invoke(prompt)
+                
+                if response and response.get("is_cve_related") and response.get("summary"):
+                    summaries_dict[url] = response["summary"].strip()
+                
+            except Exception as e:
+                print(f"Error during structured summarization for {url}: {e}")
+                continue
+
+        return {**state,
+                "summaries": summaries_dict}
+
 class NoSummarizerNode:
     """
     A LangGraph node that substitutes the summarizer; it executes no LLM summarization.

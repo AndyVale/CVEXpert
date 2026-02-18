@@ -16,7 +16,7 @@ from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.scrapers import extract_md_trafilatura
 from Graph.Nodes.chunkers import SemanticChunkerNode
 from Graph.Nodes.filters import CosineFilterNode
-from Graph.Nodes.summarizers import ReferenceSummarizerNode, NoSummarizerNode
+from Graph.Nodes.summarizers import CVEAwareSummarizerNode
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
@@ -33,7 +33,7 @@ def run_evaluation(args):
     
     # Create a unique folder for this pipeline configuration
     run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"LOG_{run_id_str}")
+    run_folder = os.path.join(log_dir, f"LOG_GPT_NORANDAware")
     os.makedirs(run_folder, exist_ok=True)
     
     output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         base_url=VAST_HOST,
     )
 
-    summarizer = ReferenceSummarizerNode(
+    summarizer = CVEAwareSummarizerNode(
         model=summarizer_llm,
         labels_descriptions=LABELS_DESCRIPTIONS,
     )
