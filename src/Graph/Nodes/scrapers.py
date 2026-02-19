@@ -23,7 +23,6 @@ def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
             extracted Markdown content.
     """
     url_refs = state["nvd_url_references"].copy()
-    random.shuffle(url_refs)
     
     pages_dict = {}
     for url_ref in tqdm(url_refs, "Extracting references"):
