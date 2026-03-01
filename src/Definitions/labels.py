@@ -16,4 +16,125 @@ LABELS_DESCRIPTIONS = {
     "InputValidation": "Improper Input Validation: General failure to validate data correctness. Catch-all for Dangerous File Uploads, Integer Overflows, and Format Strings."
 }
 
+VULNERABILITY_TREE = {
+    "InputValidation": {
+        "description": "Input Validation: Failures to properly verify, filter, or sanitize data received from external sources before processing.",
+        "children": {
+            "InjectionFlaws": {
+                "description": "Injection Flaws: Broad category where untrusted data is sent to an interpreter as part of a command or query.",
+                "children": {
+                    "SQLi": {
+                        "description": "SQL Injection: Malicious SQL queries are injected to manipulate the database.",
+                        "children": {}
+                    },
+                    "CommandInjection": {
+                        "description": "Command Injection: Unvalidated input is used to construct system shell commands. Covers OS Command Injection.",
+                        "children": {}
+                    },
+                    "CodeInjection": {
+                        "description": "Code Injection: Unvalidated input is executed as code by the application's interpreter (e.g., PHP, Python, Java).",
+                        "children": {}
+                    },
+                    "XSS": {
+                        "description": "Cross-site Scripting: Malicious scripts are injected into web pages and executed in the victim's browser.",
+                        "children": {}
+                    },
+                    "PathTraversal": {
+                        "description": "Path Traversal: Manipulation of file paths (e.g., '../') to access files or directories outside the intended scope.",
+                        "children": {}
+                    },
+                    "UntrustedDeserialization": {
+                        "description": "Deserialization of Untrusted Data: Unsafe restoration of objects from data streams, leading to RCE or logic manipulation.",
+                        "children": {}
+                    }
+                }
+            },
+            "RequestHandling": {
+                "description": "Request Handling: Flaws in how an application constructs and sends requests to other network components.",
+                "children": {
+                    "SSRF": {
+                        "description": "Server-Side Request Forgery: The server is coerced into making requests to unintended internal or external resources.",
+                        "children": {}
+                    }
+                }
+            }
+        }
+    },
+    "AccessControl": {
+        "description": "AccessControl: Weaknesses in the mechanisms used to verify identity and enforce permissions across the network.",
+        "children": {
+            "BrokenAuthentication": {
+                "description": "Broken Authentication: Vulnerabilities in login or session management allowing attackers to compromise passwords or identity tokens.",
+                "children": {}
+            },
+            "ImproperAuthorization": {
+                "description": "Improper Authorization: Failure to restrict access to sensitive resources or functions based on defined user privilege levels.",
+                "children": {
+                    "CSRF": {
+                        "description": "Cross-Site Request Forgery: Unverified requests are executed on behalf of an authenticated user without their consent.",
+                        "children": {}
+                    }
+                }
+            }
+        }
+    },
+    "Memory": {
+        "description": "Memory: Low-level errors related to the insecure management of system memory, typically in compiled languages.",
+        "children": {
+            "MemoryCorruption": {
+                "description": "Memory Corruption: Flaws that allow attackers to modify memory contents to alter the execution flow of a program.",
+                "children": {
+                    "BufferOverflow": {
+                        "description": "Buffer Overflow: Writing data past buffer boundaries on the stack or heap.",
+                        "children": {}
+                    },
+                    "UseAfterFree": {
+                        "description": "Use After Free: Accessing memory after it has been explicitly freed. A specific memory corruption distinct from overflows.",
+                        "children": {}
+                    }
+                }
+            },
+            "MemoryDisclosure": {
+                "description": "Memory Disclosure: Vulnerabilities that allow an attacker to read data from memory locations they should not access.",
+                "children": {
+                    "OutOfBoundsRead": {
+                        "description": "Out-of-bounds Read: Reading data past allocated memory boundaries. Use this for memory-based information leaks.",
+                        "children": {}
+                    }
+                }
+            }
+        }
+    },
+    "ResourceManagement": {
+        "description": "Resource Management: Improper handling of limited system resources such as CPU, memory, disk space, or network bandwidth.",
+        "children": {
+            "ResourceExhaustion": {
+                "description": "Resource Exhaustion: Uncontrolled consumption of system resources like CPU or bandwidth, leading to a denial of service.",
+                "children": {}
+            },
+            "MemoryLeaks": {
+                "description": "Memory Leak: Failure to release memory after it is no longer needed, eventually leading to system instability or crashes.",
+                "children": {}
+            }
+        }
+    },
+    "Misconfiguration": {
+        "description": "Misconfiguration: Security weaknesses arising from incorrect settings or incomplete deployment of security controls.",
+        "children": {
+            "InsecureDefaults": {
+                "description": "Insecure Defaults: Deployment of software with overly permissive permissions or factory-preset credentials that are well-known.",
+                "children": {}
+            },
+            "WeakCryptography": {
+                "description": "Weak Cryptography: Use of obsolete or flawed encryption algorithms that fail to ensure the confidentiality and integrity of data.",
+                "children": {}
+            },
+            "InformationExposure": {
+                "description": "Information Exposure: Accidental disclosure of technical details or sensitive system data through error messages or metadata.",
+                "children": {}
+            }
+        }
+    }
+}
+
 ALL_LABELS = list(LABELS_DESCRIPTIONS.keys()) + ["NONE"]
