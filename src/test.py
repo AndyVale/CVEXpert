@@ -20,7 +20,7 @@ from Graph.Nodes.filters import CosineFilterNode
 from Graph.Nodes.summarizers import CVEAwareSummarizerNode, ReferenceSummarizerNode
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
-from Graph.Nodes.classifiers import CVEClassifierNode
+from Graph.Nodes.classifiers import CVEClassifierNode, CVEConfidenceClassifierNode
 
 def run_evaluation(args):
     """
@@ -34,7 +34,7 @@ def run_evaluation(args):
     
     # Create a unique folder for this pipeline configuration
     run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"LOG_old")
+    run_folder = os.path.join(log_dir, f"LOG_GPTNewPrompt")
     os.makedirs(run_folder, exist_ok=True)
     
     output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")
@@ -73,13 +73,15 @@ def run_evaluation(args):
             log["cves"][cve] = {
                 "status": "success",
                 "nvd_description": state.get("nvd_description", ""),
-                # "nvd_references_pages": state.get("nvd_references_pages", {}),
-                # "nvd_references_chunks": state.get("nvd_references_chunks", {}),
+                "nvd_references_pages": state.get("nvd_references_pages", {}),
+                "nvd_references_chunks": state.get("nvd_references_chunks", {}),
                 "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
                 "summaries": state.get("summaries", {}), 
                 "rag_input": state.get("rag", ""),
                 "expected_labels": expected_labels,
                 "classification_output": predicted_labels,
+                "labels_motivation": state.get("labels_motivation", []), # optional
+                "labels_confidence": state.get("labels_confidence", []), # optional
                 "individual_scores": individual_scores
             }
             
@@ -117,12 +119,12 @@ def run_evaluation(args):
 
     print(f"\n[Run {RUN_N}] COMPLETED. File: {os.path.abspath(output_file)}")
     return f"Finished: Run {RUN_N}"
-    
+        
 if __name__ == "__main__":
     PARALLEL_EXECUTION = 8
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT_MODEL}/v1"
-    LOG_FILE_PATH = "/home/andyvale/Documents/cvexpert/logs/FULL_LOGS/LOG_GPT_NORANDAware/RUN_0.json"
+    LOG_FILE_PATH = "/home/andyvale/Documents/cvexpert/logs/OLD_LOGS/LOG_GPT_NORANDAware/RUN_0.json"
 
     print(f"Chat Host: {VAST_HOST}")
 

@@ -79,6 +79,8 @@ def run_evaluation(args):
                 "rag_input": state.get("rag", ""),
                 "expected_labels": expected_labels,
                 "classification_output": predicted_labels,
+                "labels_motivation": state.get("labels_motivation", []), # optional
+                "labels_confidence": state.get("labels_confidence", []), # optional
                 "individual_scores": individual_scores
             }
             

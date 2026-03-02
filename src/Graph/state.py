@@ -10,12 +10,14 @@ class CVEClassifierState(TypedDict):
         nvd_url_references: A complete list of all external reference URLs provided by NVD.
         nvd_references_pages: A dictionary mapping each URL to its full extracted text content.
         nvd_references_chunks: A dictionary mapping each (processed) URL to its full list of 
-            extracted chunks (e.g. after a chunking phase).
+            extracted chunks.
         nvd_filtered_chunks: A dictionary mapping each URL to the subset of chunks 
-            that passed the relevance filtering (e.g., cosine similarity).
+            that passed the relevance filtering.
         summaries: A dictionary mapping each URL to a summary of its relevant chunks.
         rag: The final context string formatted for the classifier.
-        cve_labels: The list of security labels assigned to the CVE by the classifier.
+        cve_labels: The list of security labels assigned to the CVE.
+        labels_motivation: A dictionary mapping each assigned label to its textual explanation/justification.
+        labels_confidence: A dictionary mapping each assigned label to a confidence score (0.0 - 1.0).
     """
     cve_id: str
     nvd_description: str
@@ -26,3 +28,5 @@ class CVEClassifierState(TypedDict):
     summaries: dict[str, str]
     rag: str
     cve_labels: list[str]
+    labels_motivation: dict[str, str]
+    labels_confidence: dict[str, float]
