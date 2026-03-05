@@ -20,7 +20,7 @@ from Graph.Nodes.filters import CosineFilterNode
 from Graph.Nodes.summarizers import CVEAwareSummarizerNode, ReferenceSummarizerNode
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
-from Graph.Nodes.classifiers import CVEClassifierNode, CVEConfidenceClassifierNode
+from Graph.Nodes.classifiers import CVEClassifierNode, CVESelfConsistentClassifierNode
 
 def run_evaluation(args):
     """
@@ -34,7 +34,7 @@ def run_evaluation(args):
     
     # Create a unique folder for this pipeline configuration
     run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"LOG_GPT")
+    run_folder = os.path.join(log_dir, f"LOG_GPTSelfCons0.8")
     os.makedirs(run_folder, exist_ok=True)
     
     output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")
@@ -157,9 +157,10 @@ if __name__ == "__main__":
         temperature=CHAT_MODEL_TEMP,
     )
 
-    classifier = CVEConfidenceClassifierNode(
+    classifier = CVESelfConsistentClassifierNode(
         model=classifier_llm,
         labels_descriptions=LABELS_DESCRIPTIONS,
+        total_runs=5
     )
 
     pipeline = (

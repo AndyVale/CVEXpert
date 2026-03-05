@@ -282,3 +282,150 @@ ALLOWED LABELS:
                     "cve_labels": default_labels,
                     "labels_motivation": {"NONE": f"Error: {str(e)}"},
                     "labels_confidence": default_confidence}
+        
+class CVESelfConsistentClassifierNode:
+    """
+    A LangGraph node that classifies a CVE using a self-consistency approach.
+    Confidence is calculated as the frequency of a label appearing across multiple runs.
+    """
+
+    def __init__(self, 
+                 model, 
+                 labels_descriptions: dict,
+                 total_runs = 5):
+        """
+        Initializes the CVEClassifierNode with a pre-initialized LLM.
+
+        Args:
+            model: The LLM instance used for classification (without structured output).
+            labels_descriptions (dict): Definitions of the security labels.
+            total_runs (int): Number of query to compute confidence on labels.
+        """
+        self.labels_descriptions = labels_descriptions
+        self.all_labels = list(labels_descriptions.keys()) + ["NONE"]
+        self.total_runs = total_runs
+        
+        output_schema = {
+            "title": "CVEClassification",
+            "type": "object",
+            "properties": {
+                "classifications": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "enum": self.all_labels,
+                                "description": "The security category label."
+                            },
+                            "motivation": {
+                                "type": "string",
+                                "description": "A short quote (1-2 sentences) from the text that justifies this label, specifing the reference."
+                            }
+                        },
+                        "required": ["label", "motivation"]
+                    },
+                    "minItems": 1,
+                }
+            },
+            "required": ["classifications"],
+        }
+
+        self.struct_model = model.with_structured_output(output_schema)
+    
+    def _get_prompt(self, cve_id: str, rag_content: str) -> str:
+        """Constructs the classification prompt with hierarchical context."""
+        labels_and_descriptions = '\n'.join(
+            [f"* {k}: {v}" for k, v in self.labels_descriptions.items()]
+        )
+        
+        return f"""You are a Security Research Assistant specialized in vulnerability classification.
+
+OBJECTIVE:
+Assign the most accurate security labels to the given CVE based on the evidence provided.
+
+CONTEXT ON DATA SOURCES:
+1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
+2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
+
+SUPPORTED LABELS:
+{labels_and_descriptions}
+
+VULNERABILITY DATA (ID: {cve_id}):
+{rag_content}
+
+ASSIGNMENT STEPS:
+1. Review the definition of each label carefully.
+
+2. Search the "VULNERABILITY DATA" for matching evidence. You must select ALL labels that have supporting evidence and ONLY those labels.
+
+3. For each selected label, the motivation MUST be a direct quote from the evidence, prefixed with the specific Reference ID (e.g., 'NVD Description', 'Reference 1').
+   Example format: 'Reference 2: "A buffer overflow is used to achieve RCE."'
+
+5. If NO specific technical information matches any category, select the special label "NONE" and provide a brief motivation such as "Insufficient technical information provided".
+OUTPUT REQUIREMENTS:
+- Return a structured object containing a list of classifications.
+- Each classification must have a 'label' and a 'motivation'.
+
+ALLOWED LABELS:
+{self.all_labels}
+"""
+
+    def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        cve_id = state.get("cve_id", "Unknown")
+        rag_content = state.get("rag", "")
+
+        if not rag_content:
+            return {**state, "cve_labels": ["NONE"], "labels_motivation": {"NONE": "No data"}, "labels_confidence": {"NONE": 0.0}}
+
+        print(f"Classifying {cve_id} (Self-Consistency: {self.total_runs} runs)...")
+
+        label_counts = {}
+        label_motivations = {}
+        prompt = self._get_prompt(cve_id, rag_content)
+
+        try:
+            for _ in range(self.total_runs):
+                result = self.struct_model.invoke(prompt)
+                items = result.get("classifications", [])
+                
+                # Use a set to track labels found in THIS specific run (avoid double counting per run)
+                seen_in_run = set()
+                
+                for item in items:
+                    lbl = item.get("label")
+                    if not lbl: continue
+                    
+                    # Store the first valid motivation found for this label
+                    if lbl not in label_motivations:
+                        label_motivations[lbl] = item.get("motivation", "No motivation provided")
+                    
+                    if lbl not in seen_in_run:
+                        seen_in_run.add(lbl)
+                
+                # Update global frequency counts
+                for lbl in seen_in_run:
+                    if lbl not in label_counts:
+                        label_counts[lbl] = 0
+                    label_counts[lbl] += 1
+
+            if not label_counts:
+                return {**state, "cve_labels": ["NONE"], "labels_motivation": {"NONE": "Model returned empty"}, "labels_confidence": {"NONE": 0.0}}
+
+            # Calculate confidence: Occurrences / Total Runs
+            final_confidence = {}
+            for lbl, count in label_counts.items():
+                final_confidence[lbl] = count / self.total_runs
+
+            return {**state,
+                    "cve_labels": list(label_counts.keys()),
+                    "labels_motivation": label_motivations,
+                    "labels_confidence": final_confidence}
+
+        except Exception as e:
+            print(f"Classification error for {cve_id}: {e}")
+            return {**state,
+                    "cve_labels": ["NONE"],
+                    "labels_motivation": {"NONE": str(e)},
+                    "labels_confidence": {"NONE": 0.0}}
