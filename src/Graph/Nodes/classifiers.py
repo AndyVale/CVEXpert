@@ -162,7 +162,7 @@ class CVEConfidenceClassifierNode:
                             },
                             "motivation": {
                                 "type": "string",
-                                "description": "A concise explanation (1-2 sentences) citing specific evidence from the text that justifies this label."
+                                "description": "A short quote (1-2 sentences) from the text that justifies this label, specifing the reference."
                             },
                             "confidence": {
                                 "type": "number",
@@ -205,11 +205,18 @@ VULNERABILITY DATA (ID: {cve_id}):
 
 ASSIGNMENT STEPS:
 1. Review the definition of each label carefully.
-2. Search the "VULNERABILITY DATA" for matching evidence, you should select all and only the labels that have a matching evidence.
-3. If evidence exists, select the label and directly quote a small part of the evidence, providing also the id of the reference (e.g. 'NVDDescription', 'Reference 1', 'Reference 3'), along with a brief explanation (motivation).
-4. Assign a confidence score based on the clarity of the evidence: 0 if the evidence does not suggest the label, 10 if the label is explicitly assigned to the CVE.
-5. If NO specific technical information is present, select "NONE" with low confidence and provide a brief motivation.
 
+2. Search the "VULNERABILITY DATA" for matching evidence. You must select ALL labels that have supporting evidence and ONLY those labels.
+
+3. For each selected label, the motivation MUST be a direct quote from the evidence, prefixed with the specific Reference ID (e.g., 'NVD Description', 'Reference 1').
+   Example format: 'Reference 2: "A buffer overflow is used to achieve RCE."'
+
+4. Assign a confidence score (0-10) based on the clarity of the connection to {cve_id}:
+   - **10 (Certain)**: The text explicitly assigns the label to {cve_id} (e.g., "CVE-202X-XXXX is a SQL Injection").
+   - **1-9 (Inferred)**: The text describes the technical mechanism associated with the label clearly, but might not explicitly name the CVE in that specific sentence, or the context is slightly ambiguous.
+   - *Note: If the evidence does not support the label (Score 0), do not select that label.*
+
+5. If NO specific technical information matches any category, select the special label "NONE" with a low confidence score (e.g., 1) and provide a brief motivation such as "Insufficient technical information provided".
 OUTPUT REQUIREMENTS:
 - Return a structured object containing a list of classifications.
 - Each classification must have a 'label', 'motivation', and 'confidence'.

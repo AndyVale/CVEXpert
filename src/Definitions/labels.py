@@ -86,7 +86,7 @@ VULNERABILITY_TREE = {
                 "children": {
                     "BufferOverflow": {
                         "description": "Buffer Overflow: Writing data past buffer boundaries on the stack or heap.",
-                        "children": {}
+                        "children": {},
                     },
                     "UseAfterFree": {
                         "description": "Use After Free: Accessing memory after it has been explicitly freed. A specific memory corruption distinct from overflows.",
@@ -136,5 +136,8 @@ VULNERABILITY_TREE = {
         }
     }
 }
+
+# TODO:
+# IMPACT_LIST = []
 
 ALL_LABELS = list(LABELS_DESCRIPTIONS.keys()) + ["NONE"]
