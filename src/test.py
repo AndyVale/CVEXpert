@@ -1,6 +1,11 @@
+"""
+Test linear workflow to classify CVEs against list of labels.
+"""
+
 import os
 import json
 import random
+import time
 import concurrent.futures
 
 from langchain.chat_models import init_chat_model
@@ -65,8 +70,9 @@ def run_evaluation(args):
         print(f"[Run {RUN_N}] --- Analyzing {cve} ---")
         
         try:
+            t = time.time()
             state = pipeline_instance.invoke({"cve_id": cve})
-            
+            t = time.time() - t
             predicted_labels = state["cve_labels"]
             individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
 
@@ -80,6 +86,7 @@ def run_evaluation(args):
                 "rag_input": state.get("rag", ""),
                 "expected_labels": expected_labels,
                 "classification_output": predicted_labels,
+                "required_time":t, # optional
                 "labels_motivation": state.get("labels_motivation", []), # optional
                 "labels_confidence": state.get("labels_confidence", []), # optional
                 "individual_scores": individual_scores
