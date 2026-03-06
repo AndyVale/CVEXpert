@@ -1,5 +1,67 @@
-from langchain.chat_models import init_chat_model
 from Graph.state import CVEClassifierState
+
+class CVENoRagClassifierNode:
+    def __init__(self, 
+                 model, 
+                 labels_descriptions: dict):
+
+        self.labels_descriptions = labels_descriptions
+        self.all_labels = list(labels_descriptions.keys())
+
+        output_schema = {
+            "title": "CVEClassification",
+            "type": "object",
+            "properties": {
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": self.all_labels
+                    },
+                    "minItems": 1,
+                }
+            },
+            "required": ["labels"],
+        }
+        self.struct_model = model.with_structured_output(output_schema)
+
+    def _get_prompt(self, cve_id) -> str:
+        labels_and_descriptions = '\n'.join(
+            [f"* {k}: {v}" for k, v in self.labels_descriptions.items()]
+        )
+        
+        return f"""You are a Security Research Assistant specialized in vulnerability classification.
+
+OBJECTIVE:
+Assign the most accurate security labels to the CVE {cve_id} based on your knowledge.
+
+SUPPORTED LABELS:
+{labels_and_descriptions}
+
+ASSIGNMENT STEPS:
+1. Select labels where the technical description matches the label definition.
+
+OUTPUT REQUIREMENTS:
+- Provide a structured JSON object with a single field "labels" containing an array of strings.
+- Ensure every label is selected directly from the list below.
+
+ALLOWED LABELS:
+{self.all_labels}
+"""
+
+    def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        try:
+            cve_id = state.get("cve_id", "Unknown")
+            prompt = self._get_prompt(cve_id)
+            result = self.struct_model.invoke(prompt)
+            
+            labels = result.get("labels", ["NONE"])
+            return {**state,
+                    "cve_labels": labels}
+
+        except Exception as e:
+            return {**state,
+                    "cve_labels": ["NONE"]}
 
 class CVEClassifierNode:
     """
