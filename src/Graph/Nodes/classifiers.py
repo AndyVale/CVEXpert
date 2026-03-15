@@ -496,7 +496,8 @@ class HierarchicalClassifierNode:
     """
     A LangGraph node that classifies a CVE hierarchically.
     It dynamically adjusts the prompt and allowed labels based on the 
-    previous step's output (traversing the tree).
+    previous step's output (traversing the tree), and injects past 
+    decisions to maintain context and coherence.
     """
 
     def __init__(self, model, full_label_tree: dict):
@@ -534,24 +535,16 @@ class HierarchicalClassifierNode:
                 candidates.extend(self.flat_map[label]["children"])
         return candidates
 
-    def _get_prompt(self, cve_id: str, rag_content: str, candidates: list[str]) -> str:
+    def _get_prompt(self, cve_id: str, rag_content: str, candidates: list[str], past_decisions_str: str) -> str:
         # Build description string with dynamic hints for children
         label_lines = []
         for c in candidates:
-            # 1. Get the description
             desc = self.flat_map[c]['description']
-            
-            # 2. Get the children (if any)
             children = self.flat_map[c].get("children", [])
-            
-            # 3. Format the line
             line = f"* {c}: {desc}"
-            
-            # 4. Conditionally add the hint ONLY if children exist
             if children:
                 children_str = ", ".join(children)
                 line += f" (Includes sub-types: {children_str})"
-            
             label_lines.append(line)
 
         labels_desc_str = '\n'.join(label_lines)
@@ -564,6 +557,11 @@ Assign the most accurate security labels to the given CVE based on the evidence 
 CONTEXT ON DATA SOURCES:
 1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
 2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
+
+PREVIOUS CLASSIFICATIONS (Context):
+You have already assigned the following parent labels to this CVE:
+{past_decisions_str}
+Ensure your new sub-category selections are logically consistent with these previous choices.
 
 AVAILABLE LABELS FOR THIS STEP:
 {labels_desc_str}
@@ -582,7 +580,7 @@ ASSIGNMENT STEPS:
 OUTPUT REQUIREMENTS:
 - If NO technical evidence matches any of the available labels, or if the evidence is too ambiguous, select "NONE".
 - Do not guess. If the text is too vague to decide between the available options, select "NONE".
-- Return a structured object containing the 'label' and 'motivation'.
+- Return a structured object containing the 'label' and 'motivation', if you plan to return "NONE" add a brief motivation such as "Not enough information".
 """
 
     def __call__(self, state) -> dict:
@@ -593,7 +591,14 @@ OUTPUT REQUIREMENTS:
         if not candidates:
             return {**state, "new_labels": []}
 
-        enum_options = candidates + ["NONE"]
+        current_labels = state.get("cve_labels",[])
+        current_motivations = state.get("labels_motivation", {})
+        if current_labels:
+            past_decisions_list =[f"- {lbl}: {current_motivations.get(lbl, '')}" for lbl in current_labels]
+            past_decisions_str = "\n".join(past_decisions_list)
+        else:
+            past_decisions_str = "None (This is the first classification step at the root level)."
+
         output_schema = {
             "title": "CVEClassification",
             "type": "object",
@@ -603,8 +608,8 @@ OUTPUT REQUIREMENTS:
                     "items": {
                         "type": "object",
                         "properties": {
-                            "label": {"type": "string", "enum": enum_options},
-                            "motivation": {"type": "string"}
+                            "label": {"type": "string", "enum": candidates + ["NONE"]},
+                            "motivation": {"type": "string", "description": "The justification for this label."}
                         },
                         "required": ["label", "motivation"]
                     },
@@ -615,26 +620,25 @@ OUTPUT REQUIREMENTS:
         }
 
         struct_model = self.model.with_structured_output(output_schema)
-        
-        print(f"Classifying {cve_id} -> Candidates: {candidates}")
 
         try:
-            prompt = self._get_prompt(cve_id, rag_content, candidates)
+            prompt = self._get_prompt(cve_id, rag_content, candidates, past_decisions_str)
             result = struct_model.invoke(prompt)
             
             raw_classifications = result.get("classifications", [])
             
             found_labels = []
-            motivations = state.get("labels_motivation", {}).copy()
-            all_labels = state.get("cve_labels", []).copy()
+            motivations = current_motivations.copy()
+            all_labels = current_labels.copy()
 
             for item in raw_classifications:
                 lbl = item.get("label")
-                if lbl == "NONE": continue
-                
+                if lbl == "NONE" and len(all_labels) > 0:
+                    print(f"Warning: NONE was given but {all_labels} are provided")
+                    continue
                 found_labels.append(lbl)
                 all_labels.append(lbl)
-                motivations[lbl] = item.get("motivation", "")
+                motivations[lbl] = item.get("motivation", "No motivation provided")
 
             return {
                 **state,
