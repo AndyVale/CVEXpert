@@ -491,3 +491,158 @@ ALLOWED LABELS:
                     "cve_labels": ["NONE"],
                     "labels_motivation": {"NONE": str(e)},
                     "labels_confidence": {"NONE": 0.0}}
+        
+class HierarchicalClassifierNode:
+    """
+    A LangGraph node that classifies a CVE hierarchically.
+    It dynamically adjusts the prompt and allowed labels based on the 
+    previous step's output (traversing the tree).
+    """
+
+    def __init__(self, model, full_label_tree: dict):
+        self.model = model
+        self.full_label_tree = full_label_tree
+        # Flatten tree for O(1) access to descriptions and children
+        self.flat_map = self._flatten_tree(full_label_tree)
+
+    def _flatten_tree(self, tree: dict) -> dict:
+        """Helper to create a flat map: label -> {description, children_keys}"""
+        flat = {}
+        for key, val in tree.items():
+            children = val.get("children", {})
+            flat[key] = {
+                "description": val["description"],
+                "children": list(children.keys())
+            }
+            if children:
+                flat.update(self._flatten_tree(children))
+        return flat
+
+    def _get_candidates(self, state) -> list[str]:
+        """Determine which labels can be selected in this step."""
+        current_labels = state.get("cve_labels", [])
+        new_labels = state.get("new_labels", [])
+
+        # If no labels assigned yet, start with Root Nodes
+        if not current_labels:
+            return list(self.full_label_tree.keys())
+        
+        # Otherwise, get children of the labels found in the LAST step
+        candidates = []
+        for label in new_labels:
+            if label in self.flat_map:
+                candidates.extend(self.flat_map[label]["children"])
+        return candidates
+
+    def _get_prompt(self, cve_id: str, rag_content: str, candidates: list[str]) -> str:
+        # Build description string with dynamic hints for children
+        label_lines = []
+        for c in candidates:
+            # 1. Get the description
+            desc = self.flat_map[c]['description']
+            
+            # 2. Get the children (if any)
+            children = self.flat_map[c].get("children", [])
+            
+            # 3. Format the line
+            line = f"* {c}: {desc}"
+            
+            # 4. Conditionally add the hint ONLY if children exist
+            if children:
+                children_str = ", ".join(children)
+                line += f" (Includes sub-types: {children_str})"
+            
+            label_lines.append(line)
+
+        labels_desc_str = '\n'.join(label_lines)
+
+        return f"""You are a Security Research Assistant specialized in vulnerability classification.
+
+OBJECTIVE:
+Assign the most accurate security labels to the given CVE based on the evidence provided.
+
+CONTEXT ON DATA SOURCES:
+1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
+2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
+
+AVAILABLE LABELS FOR THIS STEP:
+{labels_desc_str}
+
+VULNERABILITY DATA (ID: {cve_id}):
+{rag_content}
+
+ASSIGNMENT STEPS:
+1. Analyze the Primary Source for the main vulnerability impact.
+2. Evaluate the Secondary Sources for technical specifics (e.g., specific code injection methods, memory management issues).
+3. Select labels where the technical description matches the label definition and its included sub-types.
+4. Select all labels that are relevant to {cve_id}.
+5. For each selected label, you must extract a direct quote from the data sources that explains why the label matches. It must follow this exact format: "Reference-ID": "citation from reference".
+6. If the information is insufficient to match any specific category, select the special label "NONE".
+
+OUTPUT REQUIREMENTS:
+- If NO technical evidence matches any of the available labels, or if the evidence is too ambiguous, select "NONE".
+- Do not guess. If the text is too vague to decide between the available options, select "NONE".
+- Return a structured object containing the 'label' and 'motivation'.
+"""
+
+    def __call__(self, state) -> dict:
+        cve_id = state.get("cve_id", "Unknown")
+        rag_content = state.get("rag", "")
+        
+        candidates = self._get_candidates(state)
+        if not candidates:
+            return {**state, "new_labels": []}
+
+        enum_options = candidates + ["NONE"]
+        output_schema = {
+            "title": "CVEClassification",
+            "type": "object",
+            "properties": {
+                "classifications": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "enum": enum_options},
+                            "motivation": {"type": "string"}
+                        },
+                        "required": ["label", "motivation"]
+                    },
+                    "minItems": 1,
+                }
+            },
+            "required": ["classifications"],
+        }
+
+        struct_model = self.model.with_structured_output(output_schema)
+        
+        print(f"Classifying {cve_id} -> Candidates: {candidates}")
+
+        try:
+            prompt = self._get_prompt(cve_id, rag_content, candidates)
+            result = struct_model.invoke(prompt)
+            
+            raw_classifications = result.get("classifications", [])
+            
+            found_labels = []
+            motivations = state.get("labels_motivation", {}).copy()
+            all_labels = state.get("cve_labels", []).copy()
+
+            for item in raw_classifications:
+                lbl = item.get("label")
+                if lbl == "NONE": continue
+                
+                found_labels.append(lbl)
+                all_labels.append(lbl)
+                motivations[lbl] = item.get("motivation", "")
+
+            return {
+                **state,
+                "cve_labels": all_labels,
+                "labels_motivation": motivations,
+                "new_labels": found_labels
+            }
+
+        except Exception as e:
+            print(f"Error in hierarchical step: {e}")
+            return {**state, "new_labels": []}
