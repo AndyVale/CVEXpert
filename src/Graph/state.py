@@ -28,5 +28,6 @@ class CVEClassifierState(TypedDict):
     summaries: dict[str, str]
     rag: str
     cve_labels: list[str]
+    new_labels: list[str]
     labels_motivation: dict[str, str]
     labels_confidence: dict[str, float]

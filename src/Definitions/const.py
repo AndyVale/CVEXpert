@@ -1,66 +1,101 @@
-
-
 CVE_TEST = {
-    # Log4shell
-    # The vulnerability exists due to improper validation of log messages containing JNDI references. It allows an attacker to trigger a network request to a malicious server (SSRF), which then serves a malicious Java class that is downloaded and executed by the application (Code Injection/Untrusted Deserialization)    "CVE-2021-44228": ["CodeInjection", "UntrustedDeserialization"],
-    "CVE-2021-44228": ["CodeInjection", "UntrustedDeserialization", "SSRF", "InputValidation"],
-    # EternalBlue
-    # This critical vulnerability is a heap-based buffer overflow within the Windows SMBv1 protocol. It is caused by improper validation of the size and number of parameters in incoming packets, allowing unauthenticated remote attackers to bypass access controls and execute arbitrary code with kernel-level privileges.
-    "CVE-2017-0144": ["BufferOverflow", "InputValidation", "AccessControl"],
-    # Heartbleed
-    # This vulnerability is a critical buffer over-read in OpenSSL's Heartbeat extension. Due to improper input validation of the payload length field, the server reads memory beyond the intended buffer, leading to the exposure of sensitive information such as private keys, passwords, and session tokens.
-    "CVE-2014-0160": ["OutOfBoundsRead", "InfoLeak", "InputValidation"],
-    # Shellshock
-    # This vulnerability occurs because GNU Bash incorrectly parses environment variables containing function definitions followed by trailing commands. By appending malicious code after a function signature, an attacker can achieve OS Command Injection. The flaw stems from a fundamental failure to properly validate and bound the data within environment variables during the shell's initialization process.
-    "CVE-2014-6271": ["CommandInjection", "InputValidation"],
-    # Follina
-    # This vulnerability in the Microsoft Support Diagnostic Tool (MSDT) allows remote code execution when the utility is invoked via the ms-msdt protocol handler. By crafting malicious parameters within the URI, an attacker can trigger OS Command Injection (specifically PowerShell) because the tool fails to properly validate and sanitize the input arguments passed from calling applications like Microsoft Word.
-    "CVE-2022-30190": ["CommandInjection", "InputValidation"],
-    # Zerologon
-    # The vulnerability is a critical cryptographic flaw (fixed zero IV) in the Netlogon protocol that allows an unauthenticated attacker to bypass authentication. While the input (zeros) is syntactically valid, the flaw results in a complete failure of the authentication mechanism, granting domain admin privileges.
-    "CVE-2020-1472": ["AccessControl"],
-    # Shitrix
-    # This vulnerability chains a Directory Traversal flaw with a Code Injection issue. Unauthenticated attackers can use special path characters ('/../') to bypass access restrictions and reach internal Perl scripts. These scripts then improperly handle user input, allowing the injection of malicious Perl code which is executed by the server's Template Toolkit engine.
-    "CVE-2019-19781": ["PathTraversal", "CodeInjection", "InputValidation"],
-    # FortiOS SSL VPN Path Traversal
-    # This vulnerability is a path traversal flaw in the FortiOS SSL VPN web portal due to improper input validation of URL parameters. An unauthenticated attacker can use specially crafted HTTP requests to bypass directory restrictions and read arbitrary system files. This leads to a critical information leak, notably exposing cleartext credentials from session files, which results in a complete failure of access control.
-    "CVE-2018-13379": ["PathTraversal", "InfoLeak", "InputValidation", "AccessControl"],
-    # Apache Struts Jakarta Multipart RCE
-    # This vulnerability is caused by the improper handling of specially crafted Content-Type HTTP headers in the Jakarta Multipart parser. When an error occurs during file upload, the framework evaluates user-supplied data as OGNL expressions. This leads to arbitrary Code Injection as the malicious expressions are executed by the OGNL interpreter, stemming from a fundamental failure in Input Validation.
-    "CVE-2017-5638": ["CodeInjection", "InputValidation"],
-    # CurveBall
-    # This vulnerability exists in the Windows CryptoAPI (crypt32.dll) due to improper validation of Elliptic Curve Cryptography (ECC) certificate parameters. An attacker can supply a crafted certificate with modified curve properties to spoof a trusted root CA, effectively bypassing authentication and integrity checks (Access Control) for code signing and HTTPS connections.
-    "CVE-2020-0601": ["AccessControl", "InputValidation"],
+    # Log4Shell
+    # Unauthenticated RCE via JNDI lookup injection in Apache Log4j2
+    # The vulnerability allows untrusted input to be evaluated and executed as Java code via JNDI lookups.
+    "CVE-2021-44228":["InputValidation", "InjectionFlaws", "CodeInjection", "UntrustedDeserialization"],
 
-    # color-name npm Supply Chain Attack
-    # This CVE identifies a supply chain attack where the 'color-name' npm package was compromised via an account takeover (phishing). The attacker published a malicious version (2.0.1) containing an obfuscated payload that targets cryptocurrency transactions in browser environments. Since the provided labels describe specific technical software vulnerabilities (CWEs) and do not cover malicious code insertion or supply chain compromises, "NONE" is the most appropriate choice.
-    "CVE-2025-59145": ["CodeInjection", "XSS"], 
-    # FortiWeb Path Traversal
-    # This critical vulnerability is a relative path traversal flaw in the Fortinet FortiWeb GUI and API. By sending crafted HTTP requests with traversal sequences, an unauthenticated attacker can bypass authentication (Access Control) to reach internal system binaries and execute administrative commands (Command Injection). The issue stems from improper validation of path-related input.
-    "CVE-2025-64446": ["PathTraversal", "AccessControl", "CommandInjection", "InputValidation"],
-    # ProxyShell (Privilege Escalation component)
-    # This vulnerability is part of the ProxyShell chain and resides in the Microsoft Exchange PowerShell backend. It occurs because the service deserializes untrusted data from the X-Rps-CAT parameter to create access tokens. By providing a crafted token, an attacker can achieve Elevation of Privilege (Access Control) and impersonate administrative users, stemming from a fundamental failure to properly validate and secure the token restoration process.
-    "CVE-2021-34523": ["UntrustedDeserialization", "AccessControl", "InputValidation"],
-    # ProxyLogon (UM RCE component)
-    # This vulnerability is an insecure deserialization flaw in the Microsoft Exchange Unified Messaging service. It occurs when untrusted user-supplied data is processed by the Base64Deserialize method, allowing an attacker to achieve Remote Code Execution (Code Injection). By exploiting this flaw, an attacker can escalate privileges to SYSTEM level, representing a significant failure in both Input Validation and Access Control.
-    "CVE-2021-26857": ["UntrustedDeserialization", "CodeInjection", "AccessControl", "InputValidation"],
-    # MobileIron RCE
-    # This critical vulnerability is a Java deserialization flaw in the Hessian-based web services of MobileIron Core. An unauthenticated remote attacker can supply malicious serialized objects to achieve Remote Code Execution (Code Injection). The attack often involves bypassing initial security filters (Access Control) due to improper Input Validation of crafted requests, allowing the attacker to reach and exploit the vulnerable deserialization endpoint.
-    "CVE-2020-15505": ["UntrustedDeserialization", "CodeInjection", "AccessControl", "InputValidation"],
-    
-    # Ivanti Connect Secure RCE
-    # This vulnerability is a critical stack-based buffer overflow in the web component of Ivanti gateways. It occurs due to improper input validation when handling 'clientCapabilities' data, where the software fails to enforce buffer limits during a memory copy operation. This allows an unauthenticated remote attacker to overwrite stack memory, bypass access controls, and achieve remote code execution (RCE).
-    "CVE-2025-0282": ["BufferOverflow", "InputValidation", "AccessControl"],
-    # Trimble Cityworks
-    # Trimble Cityworks versions prior to 15.8.9 and Cityworks with office companion versions prior to 23.10 are vulnerable to a deserialization vulnerability.
-    "CVE-2025-0994": ["UntrustedDeserialization"],
-    # IngressNightmare
-    # This critical vulnerability allows unauthenticated attackers with pod network access to inject malicious NGINX directives via crafted AdmissionReview requests to the ingress-nginx Admission Webhook. This leads to Remote Code Execution (Code Injection) and the logical exposure of cluster-wide Secrets (InfoLeak). The flaw stems from improper validation of admission requests, enabling a complete bypass of standard Kubernetes RBAC and authorization boundaries (Access Control).
-    "CVE-2025-1974": ["CodeInjection", "InfoLeak", "AccessControl", "InputValidation"],
-    # Double Kill
-    # This vulnerability is a critical Use-After-Free flaw in the Microsoft VBScript engine. It occurs when the engine improperly handles objects in memory during the execution of the Class_Terminate event, allowing an attacker to re-reference and manipulate a freed object. This memory corruption allows for remote code execution (RCE) and stems from the engine's failure to properly validate the state and lifecycle of script-defined objects.
-    "CVE-2018-8174": ["UseAfterFree", "InputValidation"],
-    # Java Verifier Field Access
-    # This vulnerability is a type confusion flaw in the Java HotSpot VM bytecode verifier. Due to improper input validation during the optimization of field access instructions, a malicious Java applet can bypass the JRE sandbox (Access Control). This sandbox escape allows the attacker to execute arbitrary Java code and system commands (Code Injection) with the privileges of the local user.
-    "CVE-2012-1723": ["CodeInjection", "AccessControl", "InputValidation"],
+    # EternalBlue
+    # Remote code execution via buffer overflow in Windows SMBv1 protocol
+    # The flaw involves improper bounds checking in the kernel pool leading to a buffer overflow.
+    "CVE-2017-0144": ["Memory", "MemoryCorruption", "BufferOverflow"],
+
+    # Heartbleed
+    # Information exposure due to a buffer over-read in OpenSSL TLS heartbeat extension
+    # Missing bounds checks allow reading out-of-bounds memory, leaking sensitive data.
+    "CVE-2014-0160": ["Memory", "MemoryDisclosure", "OutOfBoundsRead"],
+
+    # Shellshock
+    # RCE via command injection in GNU Bash environment variables
+    # Unvalidated input passed via environment variables is executed as system shell commands.
+    "CVE-2014-6271":["InputValidation", "InjectionFlaws", "CommandInjection"],
+
+    # Follina
+    # RCE via command injection in Windows MSDT protocol handler
+    # Unvalidated input in a crafted document is used to construct and execute system shell commands.
+    "CVE-2022-30190":["InputValidation", "InjectionFlaws", "CommandInjection"],
+
+    # Zerologon
+    # Privilege escalation via flawed cryptographic authentication in Netlogon
+    # The protocol utilizes a flawed AES-CFB8 encryption implementation, representing weak cryptography.
+    "CVE-2020-1472": ['Misconfiguration', 'WeakCryptography', 'AccessControl', 'BrokenAuthentication'],
+
+    # Citrix ADC Path Traversal
+    # Unauthenticated RCE via directory traversal in Citrix ADC and NetScaler Gateway
+    # Manipulation of file paths allows accessing and writing files outside the intended scope.
+    "CVE-2019-19781": ["InputValidation", "InjectionFlaws", "PathTraversal"],
+
+    # FortiOS SSL VPN Path Traversal
+    # Unauthenticated arbitrary file read via path traversal in Fortinet FortiOS
+    # Attackers manipulate file paths to access internal files outside the intended web root.
+    "CVE-2018-13379": ["InputValidation", "InjectionFlaws", "PathTraversal"],
+
+    # Apache Struts 2 OGNL Injection
+    # RCE via unvalidated OGNL expressions evaluated in the Content-Type header
+    # Untrusted input is executed as code by the application's OGNL interpreter.
+    "CVE-2017-5638":["InputValidation", "InjectionFlaws", "CodeInjection"],
+
+    # CurveBall
+    # Certificate spoofing due to flawed Elliptic Curve Cryptography validation in Windows CryptoAPI
+    # The system relies on flawed cryptographic signature verification, fitting weak cryptography.
+    "CVE-2020-0601": ["Misconfiguration", "WeakCryptography"],
+
+    # CamoLeak / npm color-name Malware
+    # Embedded malicious code published via a compromised npm package account
+    # A supply chain attack adding malicious code does not match any specific technical vulnerability categories in the tree.
+    "CVE-2025-59145": ["NONE"],
+
+    # FortiWeb Path Traversal and Authentication Bypass
+    # Unauthenticated admin access via relative path traversal and forged authentication headers
+    # Attackers bypass authentication mechanisms and manipulate file paths to reach an internal CGI script.
+    "CVE-2025-64446":["InputValidation", "InjectionFlaws", "PathTraversal", "AccessControl", "BrokenAuthentication"],
+
+    # ProxyShell Exchange Privilege Escalation
+    # Elevation of privilege in Microsoft Exchange Server PowerShell backend
+    # Flaws in authorization allow attackers to bypass checks and impersonate privileged users.
+    "CVE-2021-34523": ["AccessControl", "ImproperAuthorization"],
+
+    # ProxyLogon Exchange Deserialization
+    # RCE via insecure deserialization in Microsoft Exchange Server Unified Messaging service
+    # Untrusted serialized data is unsafely restored, allowing arbitrary object instantiation and code execution.
+    "CVE-2021-26857": ["InputValidation", "InjectionFlaws", "UntrustedDeserialization"],
+
+    # MobileIron Core & Connector Deserialization RCE
+    # RCE via unsafe deserialization of Hessian format in Tomcat web service
+    # Unsafe restoration of objects from untrusted Hessian data streams leads to code execution.
+    "CVE-2020-15505": ["InputValidation", "InjectionFlaws", "UntrustedDeserialization"],
+
+    # Ivanti Connect Secure Buffer Overflow
+    # Unauthenticated RCE via a stack-based buffer overflow in IFT protocol handling
+    # Writing data past allocated stack buffer boundaries allows memory corruption and code execution.
+    "CVE-2025-0282": ["Memory", "MemoryCorruption", "BufferOverflow"],
+
+    # Trimble Cityworks Deserialization
+    # Authenticated RCE via insecure deserialization in Trimble Cityworks
+    # The application unsafely deserializes untrusted data, allowing arbitrary code execution.
+    "CVE-2025-0994": ["InputValidation", "InjectionFlaws", "UntrustedDeserialization"],
+
+    # IngressNightmare (Kubernetes Ingress-NGINX)
+    # Unauthenticated RCE via injection of malicious NGINX configuration directives
+    # Unvalidated input is used to inject configuration directives that are executed as code by NGINX.
+    "CVE-2025-1974":["InputValidation", "InjectionFlaws", "CodeInjection"],
+
+    # VBScript Engine Use After Free
+    # RCE due to improper handling of objects in memory within the VBScript engine
+    # Accessing explicitly freed memory allows an attacker to alter the execution flow.
+    "CVE-2018-8174":["Memory", "MemoryCorruption", "UseAfterFree"],
+
+    # Java Applet Type Confusion
+    # RCE via type confusion in the HotSpot JVM
+    # Type confusion is a low-level flaw allowing memory corruption to bypass the Java sandbox.
+    "CVE-2012-1723":["Memory", "MemoryCorruption"]
 }
