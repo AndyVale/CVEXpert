@@ -85,7 +85,7 @@ def run_evaluation(args):
             t = time.time() - t
             
             predicted_labels = state.get("cve_labels",[])
-            individual_scores = compute_individual_scores(expected_labels, predicted_labels, list(classifier_node.flat_map.keys()))
+            individual_scores = compute_individual_scores(expected_labels, predicted_labels, list(classifier_node.flat_map.keys())+["NONE"])
 
             log["cves"][cve] = {
                 "status": "success",

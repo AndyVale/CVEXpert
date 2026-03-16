@@ -121,8 +121,8 @@ VULNERABILITY_TREE = {
     "Misconfiguration": {
         "description": "Misconfiguration: Security weaknesses arising from incorrect settings or incomplete deployment of security controls.",
         "children": {
-            "InsecureDefaults": {
-                "description": "Insecure Defaults: Deployment of software with overly permissive permissions or factory-preset credentials that are well-known.",
+            "InsecureConfiguration": {
+                "description": "Insecure Configuration: Vulnerabilities where the software is shipped or deployed with inherently dangerous initial settings, publicly known factory credentials, hardcoded secrets, or overly permissive access rights out-of-the-box.",
                 "children": {}
             },
             "WeakCryptography": {
