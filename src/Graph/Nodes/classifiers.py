@@ -500,24 +500,11 @@ class HierarchicalClassifierNode:
     decisions to maintain context and coherence.
     """
 
-    def __init__(self, model, full_label_tree: dict):
+    def __init__(self, model, full_label_tree: dict, flatten_tree:dict):
         self.model = model
         self.full_label_tree = full_label_tree
         # Flatten tree for O(1) access to descriptions and children
-        self.flat_map = self._flatten_tree(full_label_tree)
-
-    def _flatten_tree(self, tree: dict) -> dict:
-        """Helper to create a flat map: label -> {description, children_keys}"""
-        flat = {}
-        for key, val in tree.items():
-            children = val.get("children", {})
-            flat[key] = {
-                "description": val["description"],
-                "children": list(children.keys())
-            }
-            if children:
-                flat.update(self._flatten_tree(children))
-        return flat
+        self.flat_map = flatten_tree
 
     def _get_candidates(self, state) -> list[str]:
         """Determine which labels can be selected in this step."""

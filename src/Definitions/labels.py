@@ -16,6 +16,9 @@ LABELS_DESCRIPTIONS = {
     "InputValidation": "Improper Input Validation: General failure to validate data correctness. Catch-all for Dangerous File Uploads, Integer Overflows, and Format Strings."
 }
 
+ALL_LABELS = list(LABELS_DESCRIPTIONS.keys()) + ["NONE"]
+
+
 VULNERABILITY_TREE = {
     "InputValidation": {
         "description": "Input Validation: Failures to properly verify, filter, or sanitize data received from external sources before processing.",
@@ -137,7 +140,30 @@ VULNERABILITY_TREE = {
     }
 }
 
-# TODO:
-# IMPACT_LIST = []
 
-ALL_LABELS = list(LABELS_DESCRIPTIONS.keys()) + ["NONE"]
+def _extract_all_tree_labels(tree: dict) -> list:
+    """Recursively extracts all keys (labels) from the vulnerability tree."""
+    labels =[]
+    for key, value in tree.items():
+        labels.append(key)
+        if "children" in value and value["children"]:
+            labels.extend(_extract_all_tree_labels(value["children"]))
+    return labels
+
+ALL_TREE_LABELS = _extract_all_tree_labels(VULNERABILITY_TREE) + ["NONE"]
+
+
+def _flatten_tree(tree: dict) -> dict:
+    """Helper to create a flat map: label -> {description, children_keys}"""
+    flat = {}
+    for key, val in tree.items():
+        children = val.get("children", {})
+        flat[key] = {
+            "description": val["description"],
+            "children": list(children.keys())
+        }
+        if children:
+            flat.update(_flatten_tree(children))
+    return flat
+
+FLATTEN_TREE = _flatten_tree(VULNERABILITY_TREE)

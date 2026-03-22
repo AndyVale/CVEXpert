@@ -17,7 +17,7 @@ from Definitions.config import (
     CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, 
     OPEN_BUTTON_TOKEN_MODEL, VAST_IP_PORT_MODEL
 )
-from Definitions.labels import VULNERABILITY_TREE, ALL_LABELS
+from Definitions.labels import VULNERABILITY_TREE, ALL_LABELS, FLATTEN_TREE, ALL_TREE_LABELS
 from Graph.state import CVEClassifierState
 
 # Import nodes
@@ -85,7 +85,7 @@ def run_evaluation(args):
             t = time.time() - t
             
             predicted_labels = state.get("cve_labels",[])
-            individual_scores = compute_individual_scores(expected_labels, predicted_labels, list(classifier_node.flat_map.keys())+["NONE"])
+            individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_TREE_LABELS)
 
             log["cves"][cve] = {
                 "status": "success",
@@ -149,7 +149,7 @@ def should_continue(state: CVEClassifierState):
     return END
 
 if __name__ == "__main__":
-    NUMBER_OF_EVALUATIONS = 8
+    NUMBER_OF_EVALUATIONS = 15
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT_MODEL}/v1"
     LOG_FILE_PATH = "/home/andyvale/Documents/cvexpert/logs/OLD_LOGS/LOG_GPT_NORANDAware/RUN_0.json"
@@ -184,12 +184,13 @@ if __name__ == "__main__":
 
     classifier_node = HierarchicalClassifierNode(
         model=classifier_llm,
-        full_label_tree=VULNERABILITY_TREE
+        full_label_tree=VULNERABILITY_TREE,
+        flatten_tree=FLATTEN_TREE
     )
 
     summarizer_node = CVEAwareSummarizerNode(
         model=summarizer_llm,
-        labels_descriptions=classifier_node.flat_map
+        labels_descriptions=FLATTEN_TREE
     )
     
     # --- 3. Build the LangGraph Workflow ---
