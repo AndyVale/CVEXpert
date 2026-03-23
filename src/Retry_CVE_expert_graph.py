@@ -17,7 +17,7 @@ from Definitions.config import (
     CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, 
     OPEN_BUTTON_TOKEN_MODEL, VAST_IP_PORT_MODEL
 )
-from Definitions.labels import VULNERABILITY_TREE, ALL_LABELS, FLATTEN_TREE, ALL_TREE_LABELS
+from Definitions.labels import VULNERABILITY_TREE, ALL_TREE_LABELS, FLATTEN_TREE
 from Graph.state import CVEClassifierState
 
 # Import nodes
@@ -25,8 +25,8 @@ from Graph.Nodes.util import StateFromFileLoader
 from Graph.Nodes.summarizers import CVEAwareSummarizerNode
 from Graph.Nodes.evaluators import compute_individual_scores, compute_grouped_scores
 from Graph.Nodes.formatters import formatter
-from Graph.Nodes.classifiers import HierarchicalClassifierNode
-from Definitions.prompts import get_cve_aware_summarizer_prompt, get_hierarchical_classifier_prompt
+from Graph.Nodes.classifiers import CVEClassifierNode
+from Definitions.prompts import get_cve_classifier_prompt_hierarchical, get_cve_aware_summarizer_prompt
 
 def run_evaluation(args):
     """
@@ -39,9 +39,8 @@ def run_evaluation(args):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
     
-    # Create a unique folder for this pipeline configuration
     run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"HIERARCHICAL_2")
+    run_folder = os.path.join(log_dir, "HIERARCHICAL_RETRY2")
     os.makedirs(run_folder, exist_ok=True)
     
     output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")
@@ -57,7 +56,7 @@ def run_evaluation(args):
                 "chat_model": CHAT_MODEL,
                 "summarizer_model": SUMMARIZER_MODEL
             },
-            "labels_schema": VULNERABILITY_TREE # Log the tree instead of flat labels
+            "labels_schema": VULNERABILITY_TREE
         },
         "cves": {},
         "aggregated_scores": {}
@@ -65,7 +64,7 @@ def run_evaluation(args):
 
     all_y_true = []
     all_y_pred =[]
-    # Shuffle to avoid NVD error of too many requests in a row
+    
     cve_shuffled = local_rng.sample(list(CVE_TEST.items()), len(CVE_TEST))
     
     for cve, expected_labels in cve_shuffled:
@@ -74,11 +73,9 @@ def run_evaluation(args):
         try:
             t = time.time()
             
-            # Initialize the LangGraph state properly
             initial_state = {
                 "cve_id": cve,
                 "cve_labels":[],
-                "new_labels":[], 
                 "labels_motivation": {},
                 "labels_confidence": {}
             }
@@ -87,13 +84,13 @@ def run_evaluation(args):
             t = time.time() - t
             
             predicted_labels = state.get("cve_labels",[])
+            
+            # Use ALL_TREE_LABELS for accurate metric calculation
             individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_TREE_LABELS)
 
             log["cves"][cve] = {
                 "status": "success",
                 "nvd_description": state.get("nvd_description", ""),
-                "nvd_references_pages": state.get("nvd_references_pages", {}),
-                "nvd_references_chunks": state.get("nvd_references_chunks", {}),
                 "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
                 "summaries": state.get("summaries", {}), 
                 "rag_input": state.get("rag", ""),
@@ -126,7 +123,8 @@ def run_evaluation(args):
 
     if all_y_true and all_y_pred:
         try:
-            grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_LABELS)
+            # Use ALL_TREE_LABELS for accurate aggregated scores
+            grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_TREE_LABELS)
             log["aggregated_scores"] = grouped_scores
         except Exception as e:
             print(f"[Run {RUN_N}] Error computing aggregated scores: {e}")
@@ -140,14 +138,37 @@ def run_evaluation(args):
     print(f"\n[Run {RUN_N}] COMPLETED. File: {os.path.abspath(output_file)}")
     return f"Finished: Run {RUN_N}"
 
-def should_continue(state: CVEClassifierState):
+from langgraph.graph import END
+
+def should_continue(state: CVEClassifierState, label_tree: dict):
     """
-    Decides if the classification process needs another step.
-    If 'new_labels' are produced and have children in the tree, we continue.
+    Validates if the predicted labels form valid hierarchical paths from the roots.
+    If any labels remain unconsumed, the hierarchy was violated and the step is re-iterated.
     """
-    queue = state.get("new_labels",[])
-    if queue:
+    predicted_labels = state.get("cve_labels", [])
+    
+    if not predicted_labels or predicted_labels == ["NONE"]:
+        return END
+        
+    labels_to_consume = set(predicted_labels)
+    
+    def consume_tree(current_tree):
+        for node_name, node_data in current_tree.items():
+            if node_name in labels_to_consume:
+                labels_to_consume.remove(node_name)
+                # Proceed in depth ONLY if the parent label was found and removed
+                children = node_data.get("children", {})
+                if children:
+                    consume_tree(children)
+
+    # Start consumption from the roots of the provided tree
+    consume_tree(label_tree)
+    
+    # If the set is not empty, there are orphaned children
+    if len(labels_to_consume) > 0:
+        print(f"Hierarchy validation failed. Orphaned labels found: {labels_to_consume}. Retrying classification...")
         return "classify_step"
+        
     return END
 
 if __name__ == "__main__":
@@ -184,13 +205,15 @@ if __name__ == "__main__":
         ]
     )
 
-    classifier_node = HierarchicalClassifierNode(
+    # Pass the ALL_TREE_LABELS imported from Definitions.labels
+    classifier_node = CVEClassifierNode(
         model=classifier_llm,
         full_label_tree=VULNERABILITY_TREE,
-        flatten_tree=FLATTEN_TREE,
-        prompt_func=get_hierarchical_classifier_prompt
+        all_tree_labels=ALL_TREE_LABELS,
+        prompt_func=get_cve_classifier_prompt_hierarchical
     )
 
+    # Pass the pre-computed FLATTEN_TREE directly
     summarizer_node = CVEAwareSummarizerNode(
         model=summarizer_llm,
         labels_descriptions=FLATTEN_TREE,
@@ -212,9 +235,10 @@ if __name__ == "__main__":
     workflow.add_node("classify_step", classifier_node)
     workflow.add_edge("format", "classify_step")
 
+    # Use the validation function to loop if the hierarchy is broken
     workflow.add_conditional_edges(
         "classify_step",
-        should_continue,
+        lambda state: should_continue(state, VULNERABILITY_TREE),
         {
             "classify_step": "classify_step",
             END: END
@@ -223,12 +247,11 @@ if __name__ == "__main__":
 
     app = workflow.compile()
 
-    # Define explicit pipeline names since StateGraph does not have a .steps attribute
     pipeline_component_names =[
         "StateFromFileLoader",
         "CVEAwareSummarizerNode",
         "formatter",
-        "HierarchicalClassifierNode"
+        "CVEClassifierNode_Hierarchical_Validation"
     ]
 
     print(f"Pipeline Components: {pipeline_component_names}")

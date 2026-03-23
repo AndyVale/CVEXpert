@@ -256,6 +256,43 @@ OUTPUT REQUIREMENTS:
 - Return a structured object containing the 'label' and 'motivation', if you plan to return "NONE" add a brief motivation such as "Not enough information".
 """
 
+# Prompt used in CVEClassifierNode for Hierarchical Classification
+def get_cve_classifier_prompt_hierarchical(cve_id: str, rag_content: str, full_label_tree: dict, all_labels: list) -> str:
+    tree_str = json.dumps(full_label_tree, indent=2)
+    return f"""You are a Security Research Assistant specialized in vulnerability classification.
+
+OBJECTIVE:
+Assign the most accurate security labels to the given CVE based on the evidence provided.
+
+CONTEXT ON DATA SOURCES:
+1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
+2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors.
+
+VULNERABILITY TREE (HIERARCHY):
+The labels are organized in a strict hierarchical tree structure:
+{tree_str}
+
+VULNERABILITY DATA (ID: {cve_id}):
+{rag_content}
+
+ASSIGNMENT STEPS & RULES:
+1. Analyze the data sources to find the specific vulnerability type.
+2. Map the vulnerability to the specific nodes in the VULNERABILITY TREE.
+3. HIERARCHY RULE (CRITICAL): If you select a specific sub-category (child), you MUST ALSO select ALL of its parent categories up to the root.
+   - Example 1: If the vulnerability is 'SQLi', you MUST output the entire path:["InputValidation", "InjectionFlaws", "SQLi"].
+   - Example 2: If the vulnerability is 'BufferOverflow', you MUST output the entire path: ["Memory", "MemoryCorruption", "BufferOverflow"].
+   - INVALID Example: Outputting ONLY["BufferOverflow"] is strictly forbidden because its parent labels ("Memory", "MemoryCorruption") are missing.
+4. If the data is vague and you can only identify the high-level category (e.g., 'InputValidation' or 'AccessControl'), it is perfectly acceptable to select ONLY the parent without selecting any children.
+5. If the information is insufficient to match any category, select the special label "NONE".
+
+OUTPUT REQUIREMENTS:
+- Provide a structured JSON object with a single field "labels" containing an array of strings.
+- Ensure every label is selected directly from the allowed list.
+
+ALLOWED LABELS:
+{all_labels}
+"""
+
 # =============================================================================
 # SUMMARIZER PROMPTS
 # =============================================================================
