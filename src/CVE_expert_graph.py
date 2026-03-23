@@ -33,6 +33,7 @@ def run_evaluation(args):
     Exception handling is applied per-CVE to ensure the run continues even if one fails.
     """
     RUN_N, pipeline_instance, pipeline_names = args
+    local_rng = random.Random(42 + RUN_N)
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
@@ -64,7 +65,7 @@ def run_evaluation(args):
     all_y_true = []
     all_y_pred =[]
     # Shuffle to avoid NVD error of too many requests in a row
-    cve_shuffled = random.sample(list(CVE_TEST.items()), len(CVE_TEST))
+    cve_shuffled = local_rng.sample(list(CVE_TEST.items()), len(CVE_TEST))
     
     for cve, expected_labels in cve_shuffled:
         print(f"[Run {RUN_N}] --- Analyzing {cve} ---")
@@ -152,7 +153,7 @@ if __name__ == "__main__":
     NUMBER_OF_EVALUATIONS = 15
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT_MODEL}/v1"
-    LOG_FILE_PATH = "/home/andyvale/Documents/cvexpert/logs/OLD_LOGS/LOG_GPT_NORANDAware/RUN_0.json"
+    LOG_FILE_PATH = "/home/andyvale/Documents/cvexpert/logs/OLD_LOGS/oldold/LOG_GPT_NORANDAware/RUN_0.json"
     
     print(f"Chat Host: {VAST_HOST}")
 

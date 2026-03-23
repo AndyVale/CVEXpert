@@ -1,4 +1,5 @@
 from Graph.state import CVEClassifierState
+import json
 
 class CVENoRagClassifierNode:
     def __init__(self, 
@@ -67,29 +68,30 @@ class CVEClassifierNode:
     """
     A LangGraph node that classifies a CVE into security categories using an LLM.
 
-    This node takes the aggregated technical context (RAG) and the primary NVD description 
-    to assign one or more security labels. It uses a structured output approach to 
-    ensure that the returned labels belong to a predefined set of supported categories.
+    This node takes the aggregated technical context (RAG) and the full vulnerability 
+    tree. It instructs the LLM to select labels hierarchically (i.e., selecting a child 
+    requires selecting all its ancestors).
 
     Attributes:
-        labels_descriptions (dict): A mapping of label names to their technical definitions.
-        all_labels (list): A list of valid label strings, including the "NONE" fallback.
+        full_label_tree (dict): The complete hierarchical tree of vulnerabilities.
+        all_labels (list): A flat list of all valid label strings, including "NONE".
         struct_model: The LLM instance configured with a structured output schema.
     """
 
     def __init__(self, 
                  model, 
-                 labels_descriptions: dict):
+                 full_label_tree: dict,
+                 all_tree_labels: list):
         """
-        Initializes the CVEClassifierNode with a pre-initialized LLM.
+        Initializes the CVEClassifierNode with a pre-initialized LLM and the label tree.
 
         Args:
-            model: The LLM instance used for classification (without structured output).
-            labels_descriptions (dict): Definitions of the security labels.
+            model: The LLM instance used for classification.
+            full_label_tree (dict): The hierarchical tree of security labels.
+            all_tree_labels (list): Flat list of all valid labels (including "NONE").
         """
-        self.labels_descriptions = labels_descriptions
-        # Generate the list of allowed strings for the JSON enum validation
-        self.all_labels = list(labels_descriptions.keys()) + ["NONE"]
+        self.full_label_tree = full_label_tree
+        self.all_labels = all_tree_labels
 
         # Define the structured output schema with enum constraints
         output_schema = {
@@ -112,10 +114,9 @@ class CVEClassifierNode:
         self.struct_model = model.with_structured_output(output_schema)
 
     def _get_prompt(self, cve_id: str, rag_content: str) -> str:
-        """Constructs the classification prompt with hierarchical context."""
-        labels_and_descriptions = '\n'.join(
-            [f"* {k}: {v}" for k, v in self.labels_descriptions.items()]
-        )
+        """Constructs the classification prompt with hierarchical context and strict rules."""
+        # Convert the tree to a formatted string for the prompt
+        tree_str = json.dumps(self.full_label_tree, indent=2)
         
         return f"""You are a Security Research Assistant specialized in vulnerability classification.
 
@@ -124,23 +125,28 @@ Assign the most accurate security labels to the given CVE based on the evidence 
 
 CONTEXT ON DATA SOURCES:
 1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
-2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
+2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors.
 
-SUPPORTED LABELS:
-{labels_and_descriptions}
+VULNERABILITY TREE (HIERARCHY):
+The labels are organized in a strict hierarchical tree structure:
+{tree_str}
 
 VULNERABILITY DATA (ID: {cve_id}):
 {rag_content}
 
-ASSIGNMENT STEPS:
-1. Analyze the Primary Source for the main vulnerability impact.
-2. Evaluate the Secondary Sources for technical specifics (e.g., specific code injection methods, memory management issues).
-3. Select labels where the technical description matches the label definition.
-4. If the information is insufficient to match any specific category, select the special label "NONE".
+ASSIGNMENT STEPS & RULES:
+1. Analyze the data sources to find the specific vulnerability type.
+2. Map the vulnerability to the specific nodes in the VULNERABILITY TREE.
+3. HIERARCHY RULE (CRITICAL): If you select a specific sub-category (child), you MUST ALSO select ALL of its parent categories up to the root.
+   - Example 1: If the vulnerability is 'SQLi', you MUST output the entire path:["InputValidation", "InjectionFlaws", "SQLi"].
+   - Example 2: If the vulnerability is 'BufferOverflow', you MUST output the entire path: ["Memory", "MemoryCorruption", "BufferOverflow"].
+   - INVALID Example: Outputting ONLY["BufferOverflow"] is strictly forbidden because its parent labels ("Memory", "MemoryCorruption") are missing.
+4. If the data is vague and you can only identify the high-level category (e.g., 'InputValidation' or 'AccessControl'), it is perfectly acceptable to select ONLY the parent without selecting any children.
+5. If the information is insufficient to match any category, select the special label "NONE".
 
 OUTPUT REQUIREMENTS:
 - Provide a structured JSON object with a single field "labels" containing an array of strings.
-- Ensure every label is selected directly from the list below.
+- Ensure every label is selected directly from the allowed list.
 
 ALLOWED LABELS:
 {self.all_labels}
@@ -162,7 +168,7 @@ ALLOWED LABELS:
         if not rag_content:
             print(f"Warning: No RAG content found for {cve_id}.")
 
-        print(f"Classifying {cve_id}...")
+        print(f"Classifying {cve_id} (Hierarchical Mode)...")
         
         try:
             prompt = self._get_prompt(cve_id, rag_content)
