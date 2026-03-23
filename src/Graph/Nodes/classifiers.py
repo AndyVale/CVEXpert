@@ -4,9 +4,11 @@ import json
 class CVENoRagClassifierNode:
     def __init__(self, 
                  model, 
-                 labels_descriptions: dict):
+                 labels_descriptions: dict,
+                 prompt_func):
 
         self.labels_descriptions = labels_descriptions
+        self.prompt_func = prompt_func
         self.all_labels = list(labels_descriptions.keys())
 
         output_schema = {
@@ -26,34 +28,10 @@ class CVENoRagClassifierNode:
         }
         self.struct_model = model.with_structured_output(output_schema)
 
-    def _get_prompt(self, cve_id) -> str:
-        labels_and_descriptions = '\n'.join(
-            [f"* {k}: {v}" for k, v in self.labels_descriptions.items()]
-        )
-        
-        return f"""You are a Security Research Assistant specialized in vulnerability classification.
-
-OBJECTIVE:
-Assign the most accurate security labels to the CVE {cve_id} based on your knowledge.
-
-SUPPORTED LABELS:
-{labels_and_descriptions}
-
-ASSIGNMENT STEPS:
-1. Select labels where the technical description matches the label definition.
-
-OUTPUT REQUIREMENTS:
-- Provide a structured JSON object with a single field "labels" containing an array of strings.
-- Ensure every label is selected directly from the list below.
-
-ALLOWED LABELS:
-{self.all_labels}
-"""
-
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         try:
             cve_id = state.get("cve_id", "Unknown")
-            prompt = self._get_prompt(cve_id)
+            prompt = self.prompt_func(cve_id, self.labels_descriptions, self.all_labels)
             result = self.struct_model.invoke(prompt)
             
             labels = result.get("labels", ["NONE"])
@@ -81,7 +59,8 @@ class CVEClassifierNode:
     def __init__(self, 
                  model, 
                  full_label_tree: dict,
-                 all_tree_labels: list):
+                 all_tree_labels: list,
+                 prompt_func):
         """
         Initializes the CVEClassifierNode with a pre-initialized LLM and the label tree.
 
@@ -92,6 +71,7 @@ class CVEClassifierNode:
         """
         self.full_label_tree = full_label_tree
         self.all_labels = all_tree_labels
+        self.prompt_func = prompt_func
 
         # Define the structured output schema with enum constraints
         output_schema = {
@@ -113,45 +93,6 @@ class CVEClassifierNode:
         # Bind the schema to the provided model instance
         self.struct_model = model.with_structured_output(output_schema)
 
-    def _get_prompt(self, cve_id: str, rag_content: str) -> str:
-        """Constructs the classification prompt with hierarchical context and strict rules."""
-        # Convert the tree to a formatted string for the prompt
-        tree_str = json.dumps(self.full_label_tree, indent=2)
-        
-        return f"""You are a Security Research Assistant specialized in vulnerability classification.
-
-OBJECTIVE:
-Assign the most accurate security labels to the given CVE based on the evidence provided.
-
-CONTEXT ON DATA SOURCES:
-1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
-2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors.
-
-VULNERABILITY TREE (HIERARCHY):
-The labels are organized in a strict hierarchical tree structure:
-{tree_str}
-
-VULNERABILITY DATA (ID: {cve_id}):
-{rag_content}
-
-ASSIGNMENT STEPS & RULES:
-1. Analyze the data sources to find the specific vulnerability type.
-2. Map the vulnerability to the specific nodes in the VULNERABILITY TREE.
-3. HIERARCHY RULE (CRITICAL): If you select a specific sub-category (child), you MUST ALSO select ALL of its parent categories up to the root.
-   - Example 1: If the vulnerability is 'SQLi', you MUST output the entire path:["InputValidation", "InjectionFlaws", "SQLi"].
-   - Example 2: If the vulnerability is 'BufferOverflow', you MUST output the entire path: ["Memory", "MemoryCorruption", "BufferOverflow"].
-   - INVALID Example: Outputting ONLY["BufferOverflow"] is strictly forbidden because its parent labels ("Memory", "MemoryCorruption") are missing.
-4. If the data is vague and you can only identify the high-level category (e.g., 'InputValidation' or 'AccessControl'), it is perfectly acceptable to select ONLY the parent without selecting any children.
-5. If the information is insufficient to match any category, select the special label "NONE".
-
-OUTPUT REQUIREMENTS:
-- Provide a structured JSON object with a single field "labels" containing an array of strings.
-- Ensure every label is selected directly from the allowed list.
-
-ALLOWED LABELS:
-{self.all_labels}
-"""
-
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
         Executes the classification logic on the current state.
@@ -171,7 +112,7 @@ ALLOWED LABELS:
         print(f"Classifying {cve_id} (Hierarchical Mode)...")
         
         try:
-            prompt = self._get_prompt(cve_id, rag_content)
+            prompt = self.prompt_func(cve_id, rag_content, self.full_label_tree, self.all_labels)
             result = self.struct_model.invoke(prompt)
             
             # Ensure we return the labels field from the JSON response
@@ -201,7 +142,8 @@ class CVEConfidenceClassifierNode:
 
     def __init__(self, 
                  model, 
-                 labels_descriptions: dict):
+                 labels_descriptions: dict,
+                 prompt_func):
         """
         Initializes the CVEClassifierNode with a pre-initialized LLM.
 
@@ -210,6 +152,7 @@ class CVEConfidenceClassifierNode:
             labels_descriptions (dict): Definitions of the security labels.
         """
         self.labels_descriptions = labels_descriptions
+        self.prompt_func = prompt_func
         # Generate the list of allowed strings for the JSON enum validation
         self.all_labels = list(labels_descriptions.keys()) + ["NONE"]
 
@@ -250,49 +193,6 @@ class CVEConfidenceClassifierNode:
         # Bind the schema to the provided model instance
         self.struct_model = model.with_structured_output(output_schema)
 
-    def _get_prompt(self, cve_id: str, rag_content: str) -> str:
-        """Constructs the classification prompt with hierarchical context."""
-        labels_and_descriptions = '\n'.join(
-            [f"* {k}: {v}" for k, v in self.labels_descriptions.items()]
-        )
-        
-        return f"""You are a Security Research Assistant specialized in vulnerability classification.
-
-OBJECTIVE:
-Assign the most accurate security labels to the given CVE based on the evidence provided.
-
-CONTEXT ON DATA SOURCES:
-1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
-2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
-
-SUPPORTED LABELS:
-{labels_and_descriptions}
-
-VULNERABILITY DATA (ID: {cve_id}):
-{rag_content}
-
-ASSIGNMENT STEPS:
-1. Review the definition of each label carefully.
-
-2. Search the "VULNERABILITY DATA" for matching evidence. You must select ALL labels that have supporting evidence and ONLY those labels.
-
-3. For each selected label, the motivation MUST be a direct quote from the evidence, prefixed with the specific Reference ID (e.g., 'NVD Description', 'Reference 1').
-   Example format: 'Reference 2: "A buffer overflow is used to achieve RCE."'
-
-4. Assign a confidence score (0-10) based on the clarity of the connection to {cve_id}:
-   - **10 (Certain)**: The text explicitly assigns the label to {cve_id} (e.g., "CVE-202X-XXXX is a SQL Injection").
-   - **1-9 (Inferred)**: The text describes the technical mechanism associated with the label clearly, but might not explicitly name the CVE in that specific sentence, or the context is slightly ambiguous.
-   - *Note: If the evidence does not support the label (Score 0), do not select that label.*
-
-5. If NO specific technical information matches any category, select the special label "NONE" with a low confidence score (e.g., 1) and provide a brief motivation such as "Insufficient technical information provided".
-OUTPUT REQUIREMENTS:
-- Return a structured object containing a list of classifications.
-- Each classification must have a 'label', 'motivation', and 'confidence'.
-
-ALLOWED LABELS:
-{self.all_labels}
-"""
-
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
         Executes the classification logic on the current state.
@@ -317,7 +217,7 @@ ALLOWED LABELS:
 
         try:
             print(f"Classifying {cve_id}...")
-            prompt = self._get_prompt(cve_id, rag_content)
+            prompt = self.prompt_func(cve_id, rag_content, self.labels_descriptions, self.all_labels)
             result = self.struct_model.invoke(prompt)
             
             # The result['labels'] is now a list of dictionaries (objects)
@@ -360,6 +260,7 @@ class CVESelfConsistentClassifierNode:
     def __init__(self, 
                  model, 
                  labels_descriptions: dict,
+                 prompt_func,
                  total_runs = 5):
         """
         Initializes the CVEClassifierNode with a pre-initialized LLM.
@@ -372,6 +273,7 @@ class CVESelfConsistentClassifierNode:
         self.labels_descriptions = labels_descriptions
         self.all_labels = list(labels_descriptions.keys()) + ["NONE"]
         self.total_runs = total_runs
+        self.prompt_func = prompt_func
         
         output_schema = {
             "title": "CVEClassification",
@@ -402,44 +304,6 @@ class CVESelfConsistentClassifierNode:
 
         self.struct_model = model.with_structured_output(output_schema)
     
-    def _get_prompt(self, cve_id: str, rag_content: str) -> str:
-        """Constructs the classification prompt with hierarchical context."""
-        labels_and_descriptions = '\n'.join(
-            [f"* {k}: {v}" for k, v in self.labels_descriptions.items()]
-        )
-        
-        return f"""You are a Security Research Assistant specialized in vulnerability classification.
-
-OBJECTIVE:
-Assign the most accurate security labels to the given CVE based on the evidence provided.
-
-CONTEXT ON DATA SOURCES:
-1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
-2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
-
-SUPPORTED LABELS:
-{labels_and_descriptions}
-
-VULNERABILITY DATA (ID: {cve_id}):
-{rag_content}
-
-ASSIGNMENT STEPS:
-1. Review the definition of each label carefully.
-
-2. Search the "VULNERABILITY DATA" for matching evidence. You must select ALL labels that have supporting evidence and ONLY those labels.
-
-3. For each selected label, the motivation MUST be a direct quote from the evidence, prefixed with the specific Reference ID (e.g., 'NVD Description', 'Reference 1').
-   Example format: 'Reference 2: "A buffer overflow is used to achieve RCE."'
-
-5. If NO specific technical information matches any category, select the special label "NONE" and provide a brief motivation such as "Insufficient technical information provided".
-OUTPUT REQUIREMENTS:
-- Return a structured object containing a list of classifications.
-- Each classification must have a 'label' and a 'motivation'.
-
-ALLOWED LABELS:
-{self.all_labels}
-"""
-
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         cve_id = state.get("cve_id", "Unknown")
         rag_content = state.get("rag", "")
@@ -451,7 +315,7 @@ ALLOWED LABELS:
 
         label_counts = {}
         label_motivations = {}
-        prompt = self._get_prompt(cve_id, rag_content)
+        prompt = self.prompt_func(cve_id, rag_content, self.labels_descriptions, self.all_labels)
 
         try:
             for _ in range(self.total_runs):
@@ -506,11 +370,12 @@ class HierarchicalClassifierNode:
     decisions to maintain context and coherence.
     """
 
-    def __init__(self, model, full_label_tree: dict, flatten_tree:dict):
+    def __init__(self, model, full_label_tree: dict, flatten_tree:dict, prompt_func):
         self.model = model
         self.full_label_tree = full_label_tree
         # Flatten tree for O(1) access to descriptions and children
         self.flat_map = flatten_tree
+        self.prompt_func = prompt_func
 
     def _get_candidates(self, state) -> list[str]:
         """Determine which labels can be selected in this step."""
@@ -527,54 +392,6 @@ class HierarchicalClassifierNode:
             if label in self.flat_map:
                 candidates.extend(self.flat_map[label]["children"])
         return candidates
-
-    def _get_prompt(self, cve_id: str, rag_content: str, candidates: list[str], past_decisions_str: str) -> str:
-        # Build description string with dynamic hints for children
-        label_lines = []
-        for c in candidates:
-            desc = self.flat_map[c]['description']
-            children = self.flat_map[c].get("children", [])
-            line = f"* {c}: {desc}"
-            if children:
-                children_str = ", ".join(children)
-                line += f" (Includes sub-types: {children_str})"
-            label_lines.append(line)
-
-        labels_desc_str = '\n'.join(label_lines)
-
-        return f"""You are a Security Research Assistant specialized in vulnerability classification.
-
-OBJECTIVE:
-Assign the most accurate security labels to the given CVE based on the evidence provided.
-
-CONTEXT ON DATA SOURCES:
-1. PRIMARY SOURCE (NVD): This is the official high-level summary. Use this to identify the general scope.
-2. SECONDARY SOURCES (Technical Summaries): These are distillations of external advisories and exploit details. Use these to find specific technical behaviors, root causes, and attack vectors that might be missing from the NVD text.
-
-PREVIOUS CLASSIFICATIONS (Context):
-You have already assigned the following parent labels to this CVE:
-{past_decisions_str}
-Ensure your new sub-category selections are logically consistent with these previous choices.
-
-AVAILABLE LABELS FOR THIS STEP:
-{labels_desc_str}
-
-VULNERABILITY DATA (ID: {cve_id}):
-{rag_content}
-
-ASSIGNMENT STEPS:
-1. Analyze the Primary Source for the main vulnerability impact.
-2. Evaluate the Secondary Sources for technical specifics (e.g., specific code injection methods, memory management issues).
-3. Select labels where the technical description matches the label definition and its included sub-types.
-4. Select all labels that are relevant to {cve_id}.
-5. For each selected label, you must extract a direct quote from the data sources that explains why the label matches. It must follow this exact format: "Reference-ID": "citation from reference".
-6. If the information is insufficient to match any specific category, select the special label "NONE".
-
-OUTPUT REQUIREMENTS:
-- If NO technical evidence matches any of the available labels, or if the evidence is too ambiguous, select "NONE".
-- Do not guess. If the text is too vague to decide between the available options, select "NONE".
-- Return a structured object containing the 'label' and 'motivation', if you plan to return "NONE" add a brief motivation such as "Not enough information".
-"""
 
     def __call__(self, state) -> dict:
         cve_id = state.get("cve_id", "Unknown")
@@ -615,7 +432,7 @@ OUTPUT REQUIREMENTS:
         struct_model = self.model.with_structured_output(output_schema)
 
         try:
-            prompt = self._get_prompt(cve_id, rag_content, candidates, past_decisions_str)
+            prompt = self.prompt_func(cve_id, rag_content, candidates, past_decisions_str, self.flat_map)
             result = struct_model.invoke(prompt)
             
             raw_classifications = result.get("classifications", [])

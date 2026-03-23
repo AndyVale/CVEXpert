@@ -18,13 +18,15 @@ class ReferenceSummarizerNode:
 
     def __init__(self, 
                  model, 
-                 labels_descriptions: dict):
+                 labels_descriptions: dict,
+                 prompt_func):
         """
         Initializes the ReferenceSummarizerNode with a pre-initialized LLM.
 
         Args:
             model: A LangChain chat model instance (e.g., initialized via init_chat_model).
             labels_descriptions (dict): Dictionary of classification labels to include in the prompt.
+            prompt_func: A callable to generate the summarizer prompt.
         """
         # Define the JSON schema for structured output
         self.json_schema = {
@@ -41,47 +43,7 @@ class ReferenceSummarizerNode:
         # Bind the structured output to the provided model instance
         self.struct_model = model.with_structured_output(self.json_schema)
         self.labels_descriptions = labels_descriptions
-
-    def _get_prompt(self, text: str) -> str:
-        """Constructs the prompt with the labels and the text to summarize."""
-        labels_str = '\n'.join([f"* {k}: {v}" for k, v in self.labels_descriptions.items()])
-        
-        return f"""
-You are a specialized cybersecurity analyst. Your task is to process a "filtered" extraction from a web page linked to a CVE (Common Vulnerabilities and Exposures).
-Your goal is to make a clear summary that will help another cybersecurity analyst to classify the CVE into several labels:
-
-{labels_str}
-
-CONTEXT FOR THE INPUT:
-- The text below is not a full page. It is a sequence of highly relevant snippets.
-- The symbol "..." indicates where irrelevant content (like ads, navigation, or boilerplate) has been removed.
-- Your goal is to bridge these snippets into a single, cohesive technical summary that will help the other analyst, ignoring the gaps.
-
-TASK:
-1. Determine if the text contains specific technical evidence of a vulnerability (e.g., a bug description, a PoC, affected versions, or an advisory).
-2. If related, create a summary that:
-   - Preserves all technical keywords (e.g., "buffer overflow", "null pointer", "CVE-XXXX").
-   - Describes the root cause and the impact.
-   - Identifies the affected software and version.
-   - Maintains the exact semantic meaning of the source.
-   - Focus on creating a summary that will help the classification of the CVE.
-
-CONSTRAINTS:
-- Produce the summary as described above.
-- Use 3 to 6 sentences.
-- Use a professional, dry, technical tone.
-- If the remaining text is too fragmented to identify a specific vulnerability, mark `is_cve_related` as false.
-
-OUTPUT FORMAT:
-Return a JSON object with:
-- `is_cve_related`: (boolean)
-- `summary`: (string)
-
-EXTRACTED TEXT TO ANALYZE:
----
-{text}
----
-"""
+        self.prompt_func = prompt_func
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
@@ -108,7 +70,8 @@ EXTRACTED TEXT TO ANALYZE:
             # print(f"Summarizing reference: {url}...")
             
             try:
-                response = self.struct_model.invoke(self._get_prompt(text_to_analyze))
+                prompt = self.prompt_func(text_to_analyze, self.labels_descriptions)
+                response = self.struct_model.invoke(prompt)
                 
                 if response and response.get("is_cve_related") and response.get("summary"):
                     summaries_dict[url] = response["summary"].strip()
@@ -139,13 +102,15 @@ class CVEAwareSummarizerNode:
 
     def __init__(self, 
                  model, 
-                 labels_descriptions: dict):
+                 labels_descriptions: dict,
+                 prompt_func):
         """
         Initializes the CVEAwareSummarizerNode with a pre-initialized LLM.
 
         Args:
             model: A LangChain chat model instance.
             labels_descriptions (dict): Dictionary of classification labels.
+            prompt_func: A callable to generate the summarizer prompt.
         """
         # Define the JSON schema for structured output
         self.json_schema = {
@@ -162,51 +127,7 @@ class CVEAwareSummarizerNode:
         # Bind the structured output to the provided model instance
         self.struct_model = model.with_structured_output(self.json_schema)
         self.labels_descriptions = labels_descriptions
-
-    def _get_prompt(self, text: str, cve_id: str, nvd_description: str) -> str:
-        """
-        Constructs a prompt that grounds the summarization in the specific CVE context.
-        """
-        labels_str = '\n'.join([f"* {k}: {v}" for k, v in self.labels_descriptions.items()])
-        
-        return f"""
-You are a specialized cybersecurity analyst. Your task is to extract technical details from a set of text fragments found on a webpage referenced by the National Vulnerability Database.
-
-TARGET VULNERABILITY:
-- **CVE ID**: {cve_id}
-- **Official Description**: {nvd_description}
-
-YOUR GOAL:
-Determine if the provided text fragments describe THIS specific vulnerability ({cve_id}). If they do, summarize the technical details found *in the fragments* that are not already obvious, focusing on information helpful for classification.
-
-TARGET CLASSIFICATION LABELS:
-{labels_str}
-
-INPUT CONTEXT:
-- The text below contains snippets extracted from a webpage.
-- The symbol "..." indicates gaps where irrelevant content was removed.
-
-INSTRUCTIONS:
-1. **Verification**: Compare the text fragments against the "Official Description". 
-   - If the text talks about a different CVE, a different software, or is just a general homepage/login screen, set `is_cve_related` to False.
-   - If the text matches {cve_id}, set `is_cve_related` to True.
-
-2. **Summarization** (Only if related):
-   - Extract specific technical details: affected versions, root cause (e.g., "heap overflow in function X"), exploit vectors, and impact.
-   - Do NOT just repeat the NVD description. Look for *additional* technical depth in the fragments.
-   - Ignore the "..." gaps. Bridge the fragments into a cohesive technical summary.
-   - Use a professional, dry, technical tone (3-6 sentences).
-
-OUTPUT FORMAT:
-Return a JSON object with:
-- `is_cve_related`: (boolean) True ONLY if the text explicitly discusses {cve_id}.
-- `summary`: (string) The technical summary.
-
-EXTRACTED TEXT TO ANALYZE:
----
-{text}
----
-"""
+        self.prompt_func = prompt_func
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
@@ -238,7 +159,7 @@ EXTRACTED TEXT TO ANALYZE:
             
             try:
                 # Pass the CVE context to the prompt generator
-                prompt = self._get_prompt(text_to_analyze, cve_id, nvd_description)
+                prompt = self.prompt_func(text_to_analyze, cve_id, nvd_description, self.labels_descriptions)
                 
                 response = self.struct_model.invoke(prompt)
                 

@@ -26,6 +26,7 @@ from Graph.Nodes.summarizers import CVEAwareSummarizerNode
 from Graph.Nodes.evaluators import compute_individual_scores, compute_grouped_scores
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import HierarchicalClassifierNode
+from Definitions.prompts import get_cve_aware_summarizer_prompt, get_hierarchical_classifier_prompt
 
 def run_evaluation(args):
     """
@@ -40,7 +41,7 @@ def run_evaluation(args):
     
     # Create a unique folder for this pipeline configuration
     run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"GraphGPT")
+    run_folder = os.path.join(log_dir, f"GraphGPTTEST")
     os.makedirs(run_folder, exist_ok=True)
     
     output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")
@@ -186,12 +187,14 @@ if __name__ == "__main__":
     classifier_node = HierarchicalClassifierNode(
         model=classifier_llm,
         full_label_tree=VULNERABILITY_TREE,
-        flatten_tree=FLATTEN_TREE
+        flatten_tree=FLATTEN_TREE,
+        prompt_func=get_hierarchical_classifier_prompt
     )
 
     summarizer_node = CVEAwareSummarizerNode(
         model=summarizer_llm,
-        labels_descriptions=FLATTEN_TREE
+        labels_descriptions=FLATTEN_TREE,
+        prompt_func=get_cve_aware_summarizer_prompt
     )
     
     # --- 3. Build the LangGraph Workflow ---
