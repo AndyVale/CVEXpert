@@ -5,9 +5,9 @@ def formatter(state: CVEClassifierState) -> CVEClassifierState:
 
     if state["summaries"]:
         ref_sections = []
-        tech_references = [summary for url, summary in state["summaries"].items() if summary] # TODO: url is not used
-        for i, x in enumerate(tech_references):
-            ref_sections.append(f"[Technical Insight from Reference {i+1}]\n{x}")
+        for url, summary in state.get("summaries", {}).items():
+            if summary:
+                ref_sections.append(f"[Technical Insight from Reference: {url}]\n{summary}")
         references_text = "\n\n".join(ref_sections)
     else:
         references_text = "No additional technical references provided."

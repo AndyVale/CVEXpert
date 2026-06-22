@@ -63,7 +63,7 @@ class RecursiveCharacterChunkerNode:
                 chunks_dict[url] = chunks
             except Exception as e:
                 print(f"Error during recursive character chunking for {url}: {e}")
-                chunks_dict[url] = []
+                raise RuntimeError(f"Chunking error for {url}: {e}") from e
 
         return {**state,
                 "nvd_references_chunks": chunks_dict}
@@ -116,7 +116,7 @@ class MarkdownChunkerNode:
                 chunks_dict[url] = [doc.page_content for doc in documents]
             except Exception as e:
                 print(f"Error during markdown chunking for {url}: {e}")
-                chunks_dict[url] = []
+                raise RuntimeError(f"Chunking error for {url}: {e}") from e
 
         return {**state,
                 "nvd_references_chunks": chunks_dict}
@@ -187,7 +187,7 @@ class SemanticChunkerNode:
                 chunks_dict[url] = chunks
             except Exception as e:
                 print(f"Error during semantic chunking for {url}: {e}")
-                chunks_dict[url] = []
+                raise RuntimeError(f"Chunking error for {url}: {e}") from e
 
         return {**state,
                 "nvd_references_chunks": chunks_dict}

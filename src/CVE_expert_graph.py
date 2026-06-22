@@ -41,7 +41,7 @@ def run_evaluation(args):
     
     # Create a unique folder for this pipeline configuration
     run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"HIERARCHICAL_2")
+    run_folder = os.path.join(log_dir, f"LOLLO_new")
     os.makedirs(run_folder, exist_ok=True)
     
     output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")

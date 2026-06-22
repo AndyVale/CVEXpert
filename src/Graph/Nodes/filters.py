@@ -50,30 +50,34 @@ class CosineFilterNode:
         if not references_chunks:
              return {**state, "nvd_filtered_chunks": {}}
 
-        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
-            if not chunks:
-                filtered_results[url] = []
-                continue
+        all_chunks = []
+        chunk_url_mapping = []
+        filtered_results = {}
+        
+        for url, chunks in references_chunks.items():
+            filtered_results[url] = []
+            if chunks:
+                for i, chunk in enumerate(chunks):
+                    all_chunks.append(chunk)
+                    chunk_url_mapping.append(url)
 
-            # Vectorize chunks using LangChain's embed_documents method
-            chunk_embeddings = np.array(self.embed_model.embed_documents(chunks))
-            
-            # Calculate Cosine Similarity (Dot product of normalized vectors)
-            similarities = np.dot(chunk_embeddings, self.query_embedding)
+        if not all_chunks:
+            return {**state, "nvd_filtered_chunks": filtered_results}
 
-            final_content = []
-            gap_added = False
+        # Vectorize all chunks at once
+        all_embeddings = np.array(self.embed_model.embed_documents(all_chunks))
+        all_similarities = np.dot(all_embeddings, self.query_embedding)
 
-            for i, score in enumerate(similarities):
-                if score >= self.threshold:
-                    final_content.append(chunks[i])
-                    gap_added = False
-                else:
-                    if not gap_added:
-                        final_content.append("...")
-                        gap_added = True
-            
-            filtered_results[url] = final_content
+        gap_added_dict = {url: False for url in references_chunks}
+
+        for url, score, chunk in zip(chunk_url_mapping, all_similarities, all_chunks):
+            if score >= self.threshold:
+                filtered_results[url].append(chunk)
+                gap_added_dict[url] = False
+            else:
+                if not gap_added_dict[url]:
+                    filtered_results[url].append("...")
+                    gap_added_dict[url] = True
 
         return {**state, 
                 "nvd_filtered_chunks": filtered_results}
@@ -129,19 +133,34 @@ class CrossEncoderFilterNode:
         if not references_chunks:
             return {**state, "nvd_filtered_chunks": {}}
 
-        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using CrossEncoder"):
-            if not chunks:
-                filtered_results[url] = []
-                continue
+        all_pairs = []
+        chunk_url_mapping = []
+        filtered_results = {}
+        
+        for url, chunks in references_chunks.items():
+            filtered_results[url] = []
+            if chunks:
+                for i, chunk in enumerate(chunks):
+                    all_pairs.append([self.query, chunk])
+                    chunk_url_mapping.append((url, i))
 
-            # Prepare pairs for the Cross-Encoder
-            pairs = [[self.query, chunk] for chunk in chunks]
+        if not all_pairs:
+            return {**state, "nvd_filtered_chunks": filtered_results}
+
+        # Predict all pairs at once
+        all_logits = self.cross_model.predict(all_pairs)
+        
+        logits_by_url = {url: [] for url in references_chunks}
+        for (url, idx), logit in zip(chunk_url_mapping, all_logits):
+            logits_by_url[url].append((idx, logit))
             
-            # Predict scores (logits)
-            logits = self.cross_model.predict(pairs)
-            
+        for url, chunks in references_chunks.items():
+            if not chunks:
+                continue
+                
+            url_logits = logits_by_url[url]
             # Identify indices of the top_k chunks that also meet the absolute threshold
-            indexed_scores = sorted(enumerate(logits), key=lambda x: x[1], reverse=True)
+            indexed_scores = sorted(url_logits, key=lambda x: x[1], reverse=True)
             
             # Create a set of indices to keep (Logic: Top K AND > Threshold)
             top_indices = {

@@ -61,26 +61,25 @@ class ReferenceSummarizerNode:
         if not filtered_chunks_dict:
             return {**state, "summaries": {}}
 
-        for url, chunks in tqdm(filtered_chunks_dict.items(), "Summarizing filtered chunks"):
-            if all([c == "..." for c in chunks]):
-                continue
+        urls_to_summarize = []
+        prompts = []
 
+        for url, chunks in filtered_chunks_dict.items():
+            if not chunks or all(c == "..." for c in chunks):
+                continue
             text_to_analyze = "\n\n".join(chunks).strip()
+            prompt = self.prompt_func(text_to_analyze, self.labels_descriptions)
+            urls_to_summarize.append(url)
+            prompts.append(prompt)
 
-            # print(f"Summarizing reference: {url}...")
-            
+        if prompts:
             try:
-                prompt = self.prompt_func(text_to_analyze, self.labels_descriptions)
-                response = self.struct_model.invoke(prompt)
-                
-                if response and response.get("is_cve_related") and response.get("summary"):
-                    summaries_dict[url] = response["summary"].strip()
-
-                # print("Summarization completed")
-                
+                responses = self.struct_model.batch(prompts)
+                for url, response in zip(urls_to_summarize, responses):
+                    if response and response.get("is_cve_related") and response.get("summary"):
+                        summaries_dict[url] = response["summary"].strip()
             except Exception as e:
-                print(f"Error during structured summarization for {url}: {e}")
-                continue
+                raise RuntimeError(f"Summarization batch error: {e}") from e
 
         return {**state,
                 "summaries": summaries_dict}
@@ -150,25 +149,26 @@ class CVEAwareSummarizerNode:
         if not filtered_chunks_dict:
             return {**state, "summaries": {}}
 
-        for url, chunks in tqdm(filtered_chunks_dict.items(), "Summarizing filtered chunks"):
+        urls_to_summarize = []
+        prompts = []
+
+        for url, chunks in filtered_chunks_dict.items():
             # Skip empty or gap-only chunks
             if not chunks or all(c == "..." for c in chunks):
                 continue
-
             text_to_analyze = "\n\n".join(chunks).strip()
-            
+            prompt = self.prompt_func(text_to_analyze, cve_id, nvd_description, self.labels_descriptions)
+            urls_to_summarize.append(url)
+            prompts.append(prompt)
+
+        if prompts:
             try:
-                # Pass the CVE context to the prompt generator
-                prompt = self.prompt_func(text_to_analyze, cve_id, nvd_description, self.labels_descriptions)
-                
-                response = self.struct_model.invoke(prompt)
-                
-                if response and response.get("is_cve_related") and response.get("summary"):
-                    summaries_dict[url] = response["summary"].strip()
-                
+                responses = self.struct_model.batch(prompts)
+                for url, response in zip(urls_to_summarize, responses):
+                    if response and response.get("is_cve_related") and response.get("summary"):
+                        summaries_dict[url] = response["summary"].strip()
             except Exception as e:
-                print(f"Error during structured summarization for {url}: {e}")
-                continue
+                raise RuntimeError(f"Summarization batch error for CVE {cve_id}: {e}") from e
 
         return {**state,
                 "summaries": summaries_dict}

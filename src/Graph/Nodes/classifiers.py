@@ -39,8 +39,7 @@ class CVENoRagClassifierNode:
                     "cve_labels": labels}
 
         except Exception as e:
-            return {**state,
-                    "cve_labels": ["NONE"]}
+            raise RuntimeError(f"Classification error for {cve_id}: {e}") from e
 
 class CVEClassifierNode:
     """
@@ -122,9 +121,7 @@ class CVEClassifierNode:
 
         except Exception as e:
             print(f"Classification error for {cve_id}: {e}")
-            # Return "NONE" to maintain state integrity in case of LLM failure
-            return {**state,
-                    "cve_labels": ["NONE"]}
+            raise RuntimeError(f"Classification error for {cve_id}: {e}") from e
         
 class CVEConfidenceClassifierNode:
     """
@@ -246,10 +243,7 @@ class CVEConfidenceClassifierNode:
 
         except Exception as e:
             print(f"Classification error for {cve_id}: {e}")
-            return {**state,
-                    "cve_labels": default_labels,
-                    "labels_motivation": {"NONE": f"Error: {str(e)}"},
-                    "labels_confidence": default_confidence}
+            raise RuntimeError(f"Classification error for {cve_id}: {e}") from e
         
 class CVESelfConsistentClassifierNode:
     """
@@ -357,10 +351,7 @@ class CVESelfConsistentClassifierNode:
 
         except Exception as e:
             print(f"Classification error for {cve_id}: {e}")
-            return {**state,
-                    "cve_labels": ["NONE"],
-                    "labels_motivation": {"NONE": str(e)},
-                    "labels_confidence": {"NONE": 0.0}}
+            raise RuntimeError(f"Classification error for {cve_id}: {e}") from e
         
 class HierarchicalClassifierNode:
     """
@@ -443,9 +434,23 @@ class HierarchicalClassifierNode:
 
             for item in raw_classifications:
                 lbl = item.get("label")
-                if lbl == "NONE" and len(all_labels) > 0:
-                    print(f"Warning: NONE was given but {all_labels} are provided")
+                if lbl == "NONE":
+                    # If we already have some labels, we can just ignore NONE.
+                    # If it's the very first step, found_labels remains empty and we stop.
+                    if len(all_labels) > 0:
+                        print(f"Warning: NONE was given but {all_labels} are provided")
                     continue
+                
+                # STRICT VALIDATION: Prevent infinite loops if LLM hallucinates an old label
+                if lbl not in candidates:
+                    print(f"Warning: Model hallucinated label '{lbl}' not in candidates. Ignoring.")
+                    continue
+                    
+                # Avoid duplicates just in case
+                if lbl in all_labels:
+                    print(f"Warning: Label '{lbl}' already present. Ignoring duplicate.")
+                    continue
+
                 found_labels.append(lbl)
                 all_labels.append(lbl)
                 motivations[lbl] = item.get("motivation", "No motivation provided")
@@ -459,4 +464,4 @@ class HierarchicalClassifierNode:
 
         except Exception as e:
             print(f"Error in hierarchical step: {e}")
-            return {**state, "new_labels": []}
+            raise RuntimeError(f"Classification error for {cve_id}: {e}") from e

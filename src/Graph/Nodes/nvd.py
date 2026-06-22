@@ -36,32 +36,41 @@ def __nvd_resource_reorder(refs: list, weights: dict = None) -> list[str]:
 
     return [url for _, url in sorted(ranked_refs, key=lambda x: x[0])]
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+
+def is_retryable_exception(exception):
+    """
+    Return True if we should retry.
+    Do NOT retry on HTTP 404 (Not Found).
+    """
+    if isinstance(exception, requests.exceptions.HTTPError):
+        if exception.response.status_code == 404:
+            return False
+    return True
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception(is_retryable_exception),
+    reraise=True
+)
+def fetch_nvd_data(cve_id: str):
+    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    params = {"cveId": cve_id}
+    resp = requests.get(url, params=params, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
 def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
     """
     Retrieves official CVE information from the National Vulnerability Database (NVD) API.
-
-    This function acts as the entry point of the pipeline. It fetches the official 
-    vulnerability description and the complete list of external reference URLs 
-    associated with the provided CVE ID using the NIST NVD REST API.
-
-    Args:
-        state (CVEClassifierState): The current pipeline state containing 'cve_id'.
-
-    Returns:
-        CVEClassifierState: The state updated with 'nvd_description' and 
-            'nvd_url_references' extracted from the API response.
-    Raises:
-        requests.exceptions.HTTPError: If the NVD API request fails (status code != 200).
+    ...
     """
     print("Contacting NVD API")
     cve_id = state["cve_id"]
-    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-    params = {"cveId": cve_id}
     
     try:
-        resp = requests.get(url, params=params, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
+        data = fetch_nvd_data(cve_id)
 
         vuln = data["vulnerabilities"][0]["cve"]
         description = vuln["descriptions"][0]["value"]
@@ -75,6 +84,4 @@ def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
 
     except Exception as e:
         print(f"Error during nvd_call:\n{e}")
-        return {**state,
-                "nvd_description": "No description found",
-                "nvd_url_references": [],}
+        raise RuntimeError(f"NVD API call failed for {cve_id}: {e}") from e
