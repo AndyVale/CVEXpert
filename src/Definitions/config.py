@@ -8,9 +8,10 @@ REF_MAX = 10
 NOT_NONE_REF_MAX = 5
 
 CHAT_MODEL = "openai/gpt-oss-20b"
-CHAT_MODEL_TEMP = 0.2
+CHAT_MODEL_TEMP = 0.0
 
 SUMMARIZER_MODEL = "openai/gpt-oss-20b"  # "mistralai/Ministral-3-3B-Instruct-2512"
+SUMMARIZER_MODEL_TEMP = 0.0
 
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-4B"
 

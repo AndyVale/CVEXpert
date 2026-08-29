@@ -13,7 +13,7 @@ import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN_MODEL, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT_MODEL, VAST_IP_PORT_EMBEDDING, validate_runtime_config
+from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, SUMMARIZER_MODEL_TEMP, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN_MODEL, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT_MODEL, VAST_IP_PORT_EMBEDDING, validate_runtime_config
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.util import StateFromFileLoader
@@ -150,6 +150,7 @@ if __name__ == "__main__":
         model_provider="openai",
         api_key=OPEN_BUTTON_TOKEN_MODEL,
         base_url=VAST_HOST,
+        temperature=SUMMARIZER_MODEL_TEMP,
     )
 
     summarizer = CVEAwareSummarizerNode(

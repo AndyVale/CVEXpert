@@ -4,16 +4,25 @@ Linear workflow to classify CVEs against list of labels.
 
 import os
 import json
-import random
 import time
-import concurrent.futures
 
 from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN_MODEL, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT_MODEL, VAST_IP_PORT_EMBEDDING, validate_runtime_config
+from Definitions.config import (
+    CHAT_MODEL,
+    CHAT_MODEL_TEMP,
+    EMBEDDING_MODEL,
+    OPEN_BUTTON_TOKEN_EMBEDDING,
+    OPEN_BUTTON_TOKEN_MODEL,
+    SUMMARIZER_MODEL,
+    SUMMARIZER_MODEL_TEMP,
+    VAST_IP_PORT_EMBEDDING,
+    VAST_IP_PORT_MODEL,
+    validate_runtime_config,
+)
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
@@ -43,13 +52,9 @@ def _serialize_pipeline_error(error, cve_id):
     )
     return details, safe_message
 
-def run_evaluation(args):
-    """
-    Worker function to run a single evaluation iteration.
-    Exception handling is applied per-CVE to ensure the run continues even if one fails.
-    """
-    RUN_N, pipeline_instance, pipeline_names = args
-    
+def run_evaluation(pipeline_instance, pipeline_names, run_number=0):
+    """Run one ordered benchmark pass while isolating failures per CVE."""
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
     
@@ -58,14 +63,14 @@ def run_evaluation(args):
     run_folder = os.path.join(log_dir, f"LOG_GPT_NORANDAware")
     os.makedirs(run_folder, exist_ok=True)
     
-    output_file = os.path.join(run_folder, f"RUN_{RUN_N}.json")
+    output_file = os.path.join(run_folder, f"RUN_{run_number}.json")
 
-    print(f"[Run {RUN_N}] Starting. Log: {os.path.basename(output_file)}")
+    print(f"[Run {run_number}] Starting. Log: {os.path.basename(output_file)}")
 
     log = {
         "pipeline_metadata": {
             "run_id": run_id_str,
-            "RUN_N": RUN_N + 1,
+            "RUN_N": run_number + 1,
             "pipeline_structure": pipeline_names, # Fixed variable name usage
             "models": {
                 "chat_model": CHAT_MODEL,
@@ -80,10 +85,8 @@ def run_evaluation(args):
 
     all_y_true = []
     all_y_pred = []
-    # Shuffle to avoid NVD error of too many requests in a row
-    cve_shuffled = random.sample(list(CVE_TEST.items()), len(CVE_TEST))
-    for cve, expected_labels in cve_shuffled:
-        print(f"[Run {RUN_N}] --- Analyzing {cve} ---")
+    for cve, expected_labels in CVE_TEST.items():
+        print(f"[Run {run_number}] --- Analyzing {cve} ---")
         
         try:
             t = time.time()
@@ -116,7 +119,7 @@ def run_evaluation(args):
 
         except Exception as error:
             error_details, error_msg = _serialize_pipeline_error(error, cve)
-            print(f"[Run {RUN_N}] ERROR on {cve}: {error_msg}")
+            print(f"[Run {run_number}] ERROR on {cve}: {error_msg}")
             
             log["cves"][cve] = {
                 "status": "error",
@@ -130,7 +133,7 @@ def run_evaluation(args):
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(log, f, indent=2)
 
-        print(f"[Run {RUN_N}] Log updated for {cve}")
+        print(f"[Run {run_number}] Log updated for {cve}")
 
     aggregation_complete = True
     if all_y_true and all_y_pred:
@@ -141,7 +144,7 @@ def run_evaluation(args):
                 ALL_LABELS,
             )
         except Exception as e:
-            print(f"[Run {RUN_N}] Error computing aggregated scores: {e}")
+            print(f"[Run {run_number}] Error computing aggregated scores: {e}")
             aggregation_complete = False
             log["aggregated_scores"] = {
                 "error": "Aggregate metric computation failed",
@@ -174,24 +177,25 @@ def run_evaluation(args):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2)
 
-    print(f"\n[Run {RUN_N}] COMPLETED. File: {os.path.abspath(output_file)}")
-    return f"Finished: Run {RUN_N}"
-    
-if __name__ == "__main__":
-    validate_runtime_config(require_embedding=True)
-    NUMBER_OF_EVALUATIONS = 8
-    random.seed(42)
-    VAST_HOST = f"http://{VAST_IP_PORT_MODEL}/v1"
-    VAST_HOST_EMBEDDING = f"http://{VAST_IP_PORT_EMBEDDING}/v1"
+    print(f"\n[Run {run_number}] COMPLETED. File: {os.path.abspath(output_file)}")
+    return f"Finished: Run {run_number}"
 
-    print(f"Chat Host: {VAST_HOST}")
-    print(f"Embedding Host: {VAST_HOST_EMBEDDING}")
+
+def build_pipeline():
+    """Construct the configured live linear pipeline after validation."""
+
+    validate_runtime_config(require_embedding=True)
+    vast_host = f"http://{VAST_IP_PORT_MODEL}/v1"
+    vast_host_embedding = f"http://{VAST_IP_PORT_EMBEDDING}/v1"
+
+    print(f"Chat Host: {vast_host}")
+    print(f"Embedding Host: {vast_host_embedding}")
 
     # Initialize the embedding model externally
     embedding_model_instance = OpenAIEmbeddings(
         model=EMBEDDING_MODEL, 
         api_key=OPEN_BUTTON_TOKEN_EMBEDDING,
-        base_url=VAST_HOST_EMBEDDING,
+        base_url=vast_host_embedding,
     )
 
     # Inject the model instance into the node
@@ -209,7 +213,8 @@ if __name__ == "__main__":
         model=SUMMARIZER_MODEL,
         model_provider="openai",
         api_key=OPEN_BUTTON_TOKEN_MODEL,
-        base_url=VAST_HOST,
+        base_url=vast_host,
+        temperature=SUMMARIZER_MODEL_TEMP,
     )
 
     summarizer = CVEAwareSummarizerNode(
@@ -221,7 +226,7 @@ if __name__ == "__main__":
         model=CHAT_MODEL,
         model_provider="openai",
         api_key=OPEN_BUTTON_TOKEN_MODEL,
-        base_url=VAST_HOST,
+        base_url=vast_host,
         temperature=CHAT_MODEL_TEMP,
     )
 
@@ -250,26 +255,15 @@ if __name__ == "__main__":
                 pipeline_component_names.append(target.__class__.__name__)
 
     print(f"Pipeline Components: {pipeline_component_names}")
+    return pipeline, pipeline_component_names
 
-    print(f"Starting {NUMBER_OF_EVALUATIONS} evaluations in parallel...")
-    
-    tasks_args = [
-        (i, pipeline, pipeline_component_names) 
-        for i in range(NUMBER_OF_EVALUATIONS)
-    ]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=NUMBER_OF_EVALUATIONS) as executor:
-        future_to_iter = {
-            executor.submit(run_evaluation, arg): arg[0] 
-            for arg in tasks_args
-        }
-        
-        for future in concurrent.futures.as_completed(future_to_iter):
-            iter_idx = future_to_iter[future]
-            try:
-                result = future.result()
-                print(f"Main Thread: {result}")
-            except Exception as exc:
-                print(f"Main Thread: Iteration {iter_idx} generated an exception: {exc}")
+def main():
+    """Build the live pipeline and run the benchmark exactly once."""
 
-    print("All evaluations finished.")
+    pipeline, pipeline_component_names = build_pipeline()
+    return run_evaluation(pipeline, pipeline_component_names)
+
+
+if __name__ == "__main__":
+    main()

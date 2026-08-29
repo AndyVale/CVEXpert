@@ -15,6 +15,10 @@ import CVE_expert_seq
 
 
 class RuntimeConfigurationTests(unittest.TestCase):
+    def test_chat_stages_use_zero_temperature(self):
+        self.assertEqual(config.CHAT_MODEL_TEMP, 0.0)
+        self.assertEqual(config.SUMMARIZER_MODEL_TEMP, 0.0)
+
     def test_dotenv_path_is_anchored_to_repository_root(self):
         expected_path = Path(config.__file__).resolve().parents[2] / ".env"
 
@@ -198,14 +202,11 @@ class RunnerTests(unittest.TestCase):
             with (
                 patch.object(CVE_expert_seq, "__file__", str(fake_module_path)),
                 patch.object(CVE_expert_seq, "CVE_TEST", test_cves),
-                patch.object(
-                    CVE_expert_seq.random,
-                    "sample",
-                    return_value=list(test_cves.items()),
-                ),
             ):
                 result = CVE_expert_seq.run_evaluation(
-                    (0, pipeline, ["FakePipeline"])
+                    pipeline,
+                    ["FakePipeline"],
+                    run_number=0,
                 )
 
             output_path = (
@@ -267,13 +268,12 @@ class RunnerTests(unittest.TestCase):
             with (
                 patch.object(CVE_expert_seq, "__file__", str(fake_module_path)),
                 patch.object(CVE_expert_seq, "CVE_TEST", test_cves),
-                patch.object(
-                    CVE_expert_seq.random,
-                    "sample",
-                    return_value=list(test_cves.items()),
-                ),
             ):
-                CVE_expert_seq.run_evaluation((0, pipeline, ["FakePipeline"]))
+                CVE_expert_seq.run_evaluation(
+                    pipeline,
+                    ["FakePipeline"],
+                    run_number=0,
+                )
 
             output_path = (
                 Path(temp_dir)
@@ -284,6 +284,7 @@ class RunnerTests(unittest.TestCase):
             log = json.loads(output_path.read_text(encoding="utf-8"))
 
         self.assertEqual(log["cves"]["CVE-SUCCESS"]["status"], "success")
+        self.assertEqual(pipeline.invocations, list(test_cves))
         self.assertEqual(log["cves"]["CVE-DEGRADED"]["status"], "degraded")
         self.assertEqual(
             log["cves"]["CVE-DEGRADED"]["pipeline_warnings"],
@@ -308,6 +309,27 @@ class RunnerTests(unittest.TestCase):
                 "complete": False,
             },
         )
+
+    def test_main_builds_and_runs_one_evaluation(self):
+        pipeline = FakePipeline({})
+        with (
+            patch.object(
+                CVE_expert_seq,
+                "build_pipeline",
+                return_value=(pipeline, ["FakePipeline"]),
+            ) as build,
+            patch.object(
+                CVE_expert_seq,
+                "run_evaluation",
+                return_value="Finished: Run 0",
+            ) as run,
+        ):
+            result = CVE_expert_seq.main()
+
+        build.assert_called_once_with()
+        run.assert_called_once_with(pipeline, ["FakePipeline"])
+        self.assertEqual(result, "Finished: Run 0")
+        self.assertFalse(hasattr(CVE_expert_seq, "concurrent"))
 
 
 if __name__ == "__main__":
