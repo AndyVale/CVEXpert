@@ -1,5 +1,6 @@
 from tqdm import tqdm
 import numpy as np
+from Graph.errors import PipelineStageError
 from Graph.state import CVEClassifierState
 
 class CosineFilterNode:
@@ -50,30 +51,39 @@ class CosineFilterNode:
         if not references_chunks:
              return {**state, "nvd_filtered_chunks": {}}
 
-        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
-            if not chunks:
-                filtered_results[url] = []
-                continue
+        cve_id = state.get("cve_id", "Unknown")
+        try:
+            for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
+                if not chunks:
+                    filtered_results[url] = []
+                    continue
 
-            # Vectorize chunks using LangChain's embed_documents method
-            chunk_embeddings = np.array(self.embed_model.embed_documents(chunks))
-            
-            # Calculate Cosine Similarity (Dot product of normalized vectors)
-            similarities = np.dot(chunk_embeddings, self.query_embedding)
+                # Vectorize chunks using LangChain's embed_documents method
+                chunk_embeddings = np.array(self.embed_model.embed_documents(chunks))
 
-            final_content = []
-            gap_added = False
+                # Calculate Cosine Similarity (Dot product of normalized vectors)
+                similarities = np.dot(chunk_embeddings, self.query_embedding)
 
-            for i, score in enumerate(similarities):
-                if score >= self.threshold:
-                    final_content.append(chunks[i])
-                    gap_added = False
-                else:
-                    if not gap_added:
-                        final_content.append("...")
-                        gap_added = True
-            
-            filtered_results[url] = final_content
+                final_content = []
+                gap_added = False
+
+                for i, score in enumerate(similarities):
+                    if score >= self.threshold:
+                        final_content.append(chunks[i])
+                        gap_added = False
+                    else:
+                        if not gap_added:
+                            final_content.append("...")
+                            gap_added = True
+
+                filtered_results[url] = final_content
+        except Exception as error:
+            raise PipelineStageError(
+                stage="filter",
+                cve_id=cve_id,
+                error=error,
+                safe_message="Embedding or cosine filtering failed",
+            ) from error
 
         return {**state, 
                 "nvd_filtered_chunks": filtered_results}
@@ -129,40 +139,49 @@ class CrossEncoderFilterNode:
         if not references_chunks:
             return {**state, "nvd_filtered_chunks": {}}
 
-        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using CrossEncoder"):
-            if not chunks:
-                filtered_results[url] = []
-                continue
+        cve_id = state.get("cve_id", "Unknown")
+        try:
+            for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using CrossEncoder"):
+                if not chunks:
+                    filtered_results[url] = []
+                    continue
 
-            # Prepare pairs for the Cross-Encoder
-            pairs = [[self.query, chunk] for chunk in chunks]
-            
-            # Predict scores (logits)
-            logits = self.cross_model.predict(pairs)
-            
-            # Identify indices of the top_k chunks that also meet the absolute threshold
-            indexed_scores = sorted(enumerate(logits), key=lambda x: x[1], reverse=True)
-            
-            # Create a set of indices to keep (Logic: Top K AND > Threshold)
-            top_indices = {
-                idx for idx, score in indexed_scores[:self.top_k] 
-                if score > self.threshold
-            }
+                # Prepare pairs for the Cross-Encoder
+                pairs = [[self.query, chunk] for chunk in chunks]
 
-            final_content = []
-            gap_added = False
+                # Predict scores (logits)
+                logits = self.cross_model.predict(pairs)
 
-            # Reconstruct the list in original order
-            for i in range(len(chunks)):
-                if i in top_indices:
-                    final_content.append(chunks[i])
-                    gap_added = False
-                else:
-                    if not gap_added:
-                        final_content.append("...")
-                        gap_added = True
-            
-            filtered_results[url] = final_content
+                # Identify indices of the top_k chunks that also meet the absolute threshold
+                indexed_scores = sorted(enumerate(logits), key=lambda x: x[1], reverse=True)
+
+                # Create a set of indices to keep (Logic: Top K AND > Threshold)
+                top_indices = {
+                    idx for idx, score in indexed_scores[:self.top_k]
+                    if score > self.threshold
+                }
+
+                final_content = []
+                gap_added = False
+
+                # Reconstruct the list in original order
+                for i in range(len(chunks)):
+                    if i in top_indices:
+                        final_content.append(chunks[i])
+                        gap_added = False
+                    else:
+                        if not gap_added:
+                            final_content.append("...")
+                            gap_added = True
+
+                filtered_results[url] = final_content
+        except Exception as error:
+            raise PipelineStageError(
+                stage="filter",
+                cve_id=cve_id,
+                error=error,
+                safe_message="Cross-encoder filtering failed",
+            ) from error
 
         return {**state,
                 "nvd_filtered_chunks": filtered_results}

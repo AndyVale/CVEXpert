@@ -1,4 +1,5 @@
 import requests
+from Graph.errors import PipelineStageError
 from Graph.state import CVEClassifierState
 
 DEFAULT_TAG_PRIORITIES = { # according to enum at https://github.com/CVEProject/cve-schema/blob/main/schema/tags/reference-tags.json
@@ -73,8 +74,10 @@ def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
                 "nvd_description": description,
                 "nvd_url_references": reranked_refs}
 
-    except Exception as e:
-        print(f"Error during nvd_call:\n{e}")
-        return {**state,
-                "nvd_description": "No description found",
-                "nvd_url_references": [],}
+    except Exception as error:
+        raise PipelineStageError(
+            stage="nvd",
+            cve_id=cve_id,
+            error=error,
+            safe_message="NVD request or response parsing failed",
+        ) from error

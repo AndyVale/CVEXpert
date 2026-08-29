@@ -1,6 +1,7 @@
-from typing import TypedDict
+from typing import Required, TypedDict
 
-class CVEClassifierState(TypedDict):
+
+class CVEClassifierState(TypedDict, total=False):
     """
     Represents the state of the CVE classification pipeline.
 
@@ -19,7 +20,7 @@ class CVEClassifierState(TypedDict):
         labels_motivation: A dictionary mapping each assigned label to its textual explanation/justification.
         labels_confidence: A dictionary mapping each assigned label to a confidence score (0.0 - 1.0).
     """
-    cve_id: str
+    cve_id: Required[str]
     nvd_description: str
     nvd_url_references: list[str]
     nvd_references_pages: dict[str, str]

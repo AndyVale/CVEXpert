@@ -1,4 +1,41 @@
+from typing import NoReturn
+
+from Graph.errors import PipelineStageError
 from Graph.state import CVEClassifierState
+
+
+def _validate_labels(labels, allowed_labels: list[str]) -> list[str]:
+    if not isinstance(labels, list) or not labels:
+        raise ValueError("Classifier labels must be a non-empty list")
+    if any(not isinstance(label, str) for label in labels):
+        raise TypeError("Classifier labels must be strings")
+
+    unknown_labels = [label for label in labels if label not in allowed_labels]
+    if unknown_labels:
+        raise ValueError("Classifier returned an unsupported label")
+    if len(labels) != len(set(labels)):
+        raise ValueError("Classifier returned duplicate labels")
+    if "NONE" in labels and len(labels) > 1:
+        raise ValueError("NONE cannot be combined with vulnerability labels")
+    return labels
+
+
+def _labels_from_result(result, allowed_labels: list[str]) -> list[str]:
+    if not isinstance(result, dict):
+        raise TypeError("Classifier result must be an object")
+    if "labels" not in result:
+        raise ValueError("Classifier result is missing labels")
+    return _validate_labels(result["labels"], allowed_labels)
+
+
+def _raise_classifier_error(cve_id: str, error: BaseException) -> NoReturn:
+    raise PipelineStageError(
+        stage="classify",
+        cve_id=cve_id,
+        error=error,
+        safe_message="Classifier invocation or output validation failed",
+    ) from error
+
 
 class CVENoRagClassifierNode:
     def __init__(self, 
@@ -6,7 +43,7 @@ class CVENoRagClassifierNode:
                  labels_descriptions: dict):
 
         self.labels_descriptions = labels_descriptions
-        self.all_labels = list(labels_descriptions.keys())
+        self.all_labels = list(labels_descriptions.keys()) + ["NONE"]
 
         output_schema = {
             "title": "CVEClassification",
@@ -19,6 +56,7 @@ class CVENoRagClassifierNode:
                         "enum": self.all_labels
                     },
                     "minItems": 1,
+                    "uniqueItems": True,
                 }
             },
             "required": ["labels"],
@@ -50,18 +88,17 @@ ALLOWED LABELS:
 """
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
+        cve_id = state.get("cve_id", "Unknown")
         try:
-            cve_id = state.get("cve_id", "Unknown")
             prompt = self._get_prompt(cve_id)
             result = self.struct_model.invoke(prompt)
-            
-            labels = result.get("labels", ["NONE"])
+
+            labels = _labels_from_result(result, self.all_labels)
             return {**state,
                     "cve_labels": labels}
 
-        except Exception as e:
-            return {**state,
-                    "cve_labels": ["NONE"]}
+        except Exception as error:
+            _raise_classifier_error(cve_id, error)
 
 class CVEClassifierNode:
     """
@@ -103,6 +140,7 @@ class CVEClassifierNode:
                         "enum": self.all_labels
                     },
                     "minItems": 1,
+                    "uniqueItems": True,
                 }
             },
             "required": ["labels"],
@@ -159,25 +197,20 @@ ALLOWED LABELS:
         cve_id = state.get("cve_id", "Unknown")
         rag_content = state.get("rag", "")
 
-        if not rag_content:
-            print(f"Warning: No RAG content found for {cve_id}.")
-
         print(f"Classifying {cve_id}...")
-        
+
         try:
+            if not isinstance(rag_content, str) or not rag_content.strip():
+                raise ValueError("Classifier requires non-empty RAG content")
             prompt = self._get_prompt(cve_id, rag_content)
             result = self.struct_model.invoke(prompt)
-            
-            # Ensure we return the labels field from the JSON response
-            labels = result.get("labels", ["NONE"])
+
+            labels = _labels_from_result(result, self.all_labels)
             return {**state,
                     "cve_labels": labels}
 
-        except Exception as e:
-            print(f"Classification error for {cve_id}: {e}")
-            # Return "NONE" to maintain state integrity in case of LLM failure
-            return {**state,
-                    "cve_labels": ["NONE"]}
+        except Exception as error:
+            _raise_classifier_error(cve_id, error)
         
 class CVEConfidenceClassifierNode:
     """
@@ -236,6 +269,7 @@ class CVEConfidenceClassifierNode:
                         "required": ["label", "motivation", "confidence"]
                     },
                     "minItems": 1,
+                    "uniqueItems": True,
                 }
             },
             "required": ["classifications"],
@@ -301,49 +335,40 @@ ALLOWED LABELS:
         cve_id = state.get("cve_id", "Unknown")
         rag_content = state.get("rag", "")
 
-        if not rag_content:
-            print(f"Warning: No RAG content found for {cve_id}.")
-        
-        # Default fallback values
-        default_labels = ["NONE"]
-        default_motivation = {"NONE": "Failure or missing content"}
-        default_confidence = {"NONE": 0.0}
-
         try:
+            if not isinstance(rag_content, str) or not rag_content.strip():
+                raise ValueError("Classifier requires non-empty RAG content")
             print(f"Classifying {cve_id}...")
             prompt = self._get_prompt(cve_id, rag_content)
             result = self.struct_model.invoke(prompt)
-            
-            # The result['labels'] is now a list of dictionaries (objects)
-            raw_classifications = result.get("classifications", [])
-            
-            if not raw_classifications:
-                return {**state, 
-                        "cve_labels": default_labels,
-                        "labels_motivation": default_motivation,
-                        "labels_confidence": default_confidence}
+
+            if not isinstance(result, dict):
+                raise TypeError("Classifier result must be an object")
+            raw_classifications = result.get("classifications")
+            if not isinstance(raw_classifications, list) or not raw_classifications:
+                raise ValueError("Classifier classifications must be a non-empty list")
 
             parsed_labels = []
             parsed_motivations = {}
             parsed_confidences = {}
 
             for item in raw_classifications:
-                lbl = item.get("label", "NONE")
+                if not isinstance(item, dict):
+                    raise TypeError("Each classification must be an object")
+                lbl = item.get("label")
                 parsed_labels.append(lbl)
                 parsed_motivations[lbl] = item.get("motivation", "No motivation provided")
                 parsed_confidences[lbl] = item.get("confidence", 0.0)
+
+            _validate_labels(parsed_labels, self.all_labels)
 
             return {**state,
                     "cve_labels": parsed_labels,
                     "labels_motivation": parsed_motivations,
                     "labels_confidence": parsed_confidences}
 
-        except Exception as e:
-            print(f"Classification error for {cve_id}: {e}")
-            return {**state,
-                    "cve_labels": default_labels,
-                    "labels_motivation": {"NONE": f"Error: {str(e)}"},
-                    "labels_confidence": default_confidence}
+        except Exception as error:
+            _raise_classifier_error(cve_id, error)
         
 class CVESelfConsistentClassifierNode:
     """
@@ -389,6 +414,7 @@ class CVESelfConsistentClassifierNode:
                         "required": ["label", "motivation"]
                     },
                     "minItems": 1,
+                    "uniqueItems": True,
                 }
             },
             "required": ["classifications"],
@@ -438,9 +464,6 @@ ALLOWED LABELS:
         cve_id = state.get("cve_id", "Unknown")
         rag_content = state.get("rag", "")
 
-        if not rag_content:
-            return {**state, "cve_labels": ["NONE"], "labels_motivation": {"NONE": "No data"}, "labels_confidence": {"NONE": 0.0}}
-
         print(f"Classifying {cve_id} (Self-Consistency: {self.total_runs} runs)...")
 
         label_counts = {}
@@ -448,46 +471,51 @@ ALLOWED LABELS:
         prompt = self._get_prompt(cve_id, rag_content)
 
         try:
+            if not isinstance(rag_content, str) or not rag_content.strip():
+                raise ValueError("Classifier requires non-empty RAG content")
+            if self.total_runs < 1:
+                raise ValueError("Self-consistency total_runs must be positive")
+
             for _ in range(self.total_runs):
                 result = self.struct_model.invoke(prompt)
-                items = result.get("classifications", [])
-                
-                # Use a set to track labels found in THIS specific run (avoid double counting per run)
-                seen_in_run = set()
-                
+                if not isinstance(result, dict):
+                    raise TypeError("Classifier result must be an object")
+                items = result.get("classifications")
+                if not isinstance(items, list) or not items:
+                    raise ValueError("Classifier classifications must be a non-empty list")
+
+                run_labels = []
+
                 for item in items:
-                    lbl = item.get("label")
-                    if not lbl: continue
-                    
+                    if not isinstance(item, dict):
+                        raise TypeError("Each classification must be an object")
+                    run_labels.append(item.get("label"))
+
+                _validate_labels(run_labels, self.all_labels)
+                seen_in_run = set(run_labels)
+
+                for item in items:
+                    lbl = item["label"]
                     # Store the first valid motivation found for this label
                     if lbl not in label_motivations:
                         label_motivations[lbl] = item.get("motivation", "No motivation provided")
-                    
-                    if lbl not in seen_in_run:
-                        seen_in_run.add(lbl)
-                
+
                 # Update global frequency counts
                 for lbl in seen_in_run:
                     if lbl not in label_counts:
                         label_counts[lbl] = 0
                     label_counts[lbl] += 1
 
-            if not label_counts:
-                return {**state, "cve_labels": ["NONE"], "labels_motivation": {"NONE": "Model returned empty"}, "labels_confidence": {"NONE": 0.0}}
-
             # Calculate confidence: Occurrences / Total Runs
             final_confidence = {}
             for lbl, count in label_counts.items():
                 final_confidence[lbl] = count / self.total_runs
 
+            final_labels = _validate_labels(list(label_counts.keys()), self.all_labels)
             return {**state,
-                    "cve_labels": list(label_counts.keys()),
+                    "cve_labels": final_labels,
                     "labels_motivation": label_motivations,
                     "labels_confidence": final_confidence}
 
-        except Exception as e:
-            print(f"Classification error for {cve_id}: {e}")
-            return {**state,
-                    "cve_labels": ["NONE"],
-                    "labels_motivation": {"NONE": str(e)},
-                    "labels_confidence": {"NONE": 0.0}}
+        except Exception as error:
+            _raise_classifier_error(cve_id, error)
