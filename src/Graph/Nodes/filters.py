@@ -3,6 +3,45 @@ import numpy as np
 from Graph.errors import PipelineStageError
 from Graph.state import CVEClassifierState
 
+
+def _normalize_query_embedding(embedding) -> np.ndarray:
+    vector = np.asarray(embedding, dtype=float)
+    if vector.ndim != 1 or vector.size == 0:
+        raise ValueError("Query embedding must be a non-empty one-dimensional vector")
+    if not np.all(np.isfinite(vector)):
+        raise ValueError("Query embedding contains non-finite values")
+
+    norm = np.linalg.norm(vector)
+    if norm == 0:
+        raise ValueError("Query embedding must not be a zero vector")
+    return vector / norm
+
+
+def _normalize_document_embeddings(
+    embeddings,
+    *,
+    document_count: int,
+    embedding_dimension: int,
+) -> np.ndarray:
+    matrix = np.asarray(embeddings, dtype=float)
+    if matrix.ndim != 2:
+        raise ValueError("Document embeddings must be a two-dimensional matrix")
+    if matrix.shape[0] != document_count:
+        raise ValueError("Document embedding count does not match chunk count")
+    if matrix.shape[1] != embedding_dimension:
+        raise ValueError("Query and document embedding dimensions do not match")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("Document embeddings contain non-finite values")
+
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    return np.divide(
+        matrix,
+        norms,
+        out=np.zeros_like(matrix, dtype=float),
+        where=norms != 0,
+    )
+
+
 class CosineFilterNode:
     """
     A LangGraph node that filters text chunks based on semantic similarity (Cosine Similarity).
@@ -33,7 +72,9 @@ class CosineFilterNode:
         self.query = query
         self.threshold = threshold
         # Pre-compute query embedding once using LangChain's embed_query method
-        self.query_embedding = np.array(self.embed_model.embed_query(query))
+        self.query_embedding = _normalize_query_embedding(
+            self.embed_model.embed_query(query)
+        )
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
@@ -59,9 +100,13 @@ class CosineFilterNode:
                     continue
 
                 # Vectorize chunks using LangChain's embed_documents method
-                chunk_embeddings = np.array(self.embed_model.embed_documents(chunks))
+                chunk_embeddings = _normalize_document_embeddings(
+                    self.embed_model.embed_documents(chunks),
+                    document_count=len(chunks),
+                    embedding_dimension=self.query_embedding.shape[0],
+                )
 
-                # Calculate Cosine Similarity (Dot product of normalized vectors)
+                # Both operands are L2-normalized, so their dot product is cosine similarity.
                 similarities = np.dot(chunk_embeddings, self.query_embedding)
 
                 final_content = []
