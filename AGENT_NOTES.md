@@ -6,12 +6,13 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 
 - Last updated: 2026-08-29 (Europe/Rome)
 - Active branch: `main`
-- Linear code snapshot reviewed: `b32ccf5` (`Add NoRagClassifierNode`)
+- Linear code snapshot reviewed and fixed through: `9a3a704` (`fix: compute true cosine similarity`)
 - Graph branch snapshot reviewed for comparison: `graphCVExpert` at `411baf6`
 - Documentation commit completed: `c95e0f0` (`docs: add repository guidance for coding agents`)
-- Current phase: repository documentation and technical review only
-- Production code, dependencies, taxonomy, benchmark data, and runtime behavior have not been changed.
-- Next decision: select and discuss the first reliability/bug-fix unit before editing production code.
+- Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
+- First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
+- Current phase: P0 reliability/correctness fixes complete; plan and measure the next P1 quality or acquisition unit before editing.
+- Dependencies, flat taxonomy, `CVE_TEST`, prompts, semantic threshold, retrieval query, log path, and artifact shape remain unchanged.
 
 ## Durable user decisions
 
@@ -27,14 +28,18 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 8. Intended flat-label semantics are evidence-backed multi-label classification: return each supported mechanism directly supported by evidence, and make `NONE` mutually exclusive. The existing fixture has not yet been re-audited against this intent.
 9. Chat and embedding models use separate hosts and tokens. Embedding configuration can be avoided when resuming from a JSON artifact that already contains a later-stage result such as filtered chunks.
 10. Future replay should resume from explicit named stages (for example, filtered chunks, summaries, or classification context), using a versioned artifact rather than a hard-coded one-off loader.
+11. Operational/model failure is not a classification. `NONE` is valid only after a successful, validated classifier response.
+12. Individual reference scrape, chunk, and summary failures are recoverable and make a result `degraded`; NVD, filtering, formatter-precondition, and classifier failures are terminal for that CVE.
+13. The old eight-run benchmark did not calculate an average. It has been replaced with one insertion-order run and temperature `0.0` for summarizer and classifier. Provider/runtime behavior may still vary.
+14. Partial-run metrics exclude terminal errors but must report coverage and `complete: false`; degraded classifications remain scored.
 
 ## Repository understanding
 
 ### What the current program actually is
 
-Despite the README describing a general AI tool for CVE understanding, the active entry point is a benchmark script. `src/CVE_expert_seq.py` builds one LangChain `RunnableSequence`, then runs the 20 hard-coded `CVE_TEST` cases eight times through a `ThreadPoolExecutor`.
+Despite the README describing a general AI tool for CVE understanding, the active entry point is still primarily a benchmark script. `src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, and `main()`. `main()` builds one LangChain `RunnableSequence` and processes the 20 hard-coded `CVE_TEST` cases once in insertion order.
 
-Each evaluation thread performs the entire live workflow independently:
+Each CVE invocation performs the entire live workflow:
 
 ```text
 cve_id
@@ -49,17 +54,18 @@ cve_id
   -> JSON run log
 ```
 
-No acquisition, page, chunk, embedding, or summary cache is shared across the eight evaluations.
+There is no acquisition, page, chunk, embedding, or summary cache. The default run no longer repeats the same benchmark eight times, but each CVE still performs fresh live work.
 
 ### Selected live components and defaults
 
 - Entry point: `src/CVE_expert_seq.py`
 - Benchmark cases: 20
-- Evaluation threads/runs: 8
+- Evaluation runs: 1, sequential, stable `CVE_TEST` order
 - Chat/classifier model: `openai/gpt-oss-20b`
 - Summarizer model: `openai/gpt-oss-20b`
 - Embedding model: `Qwen/Qwen3-Embedding-4B`
-- Chat temperature: `0.2`
+- Chat/classifier temperature: `0.0`
+- Summarizer temperature: `0.0`
 - Maximum successfully extracted reference pages: 10
 - Chunker: `SemanticChunkerNode`, percentile threshold amount `25.0`
 - Filter: `CosineFilterNode`, query `What type of vulnerability is it?`, threshold `0.6`
@@ -82,7 +88,16 @@ No acquisition, page, chunk, embedding, or summary cache is shared across the ei
 - `cve_labels`
 - optionally `labels_motivation` and `labels_confidence`
 
-The `TypedDict` marks every field required, but real invocations begin with only `cve_id`. Stages shallow-copy the current dictionary and add their output.
+Only `cve_id` is required in `CVEClassifierState`; stage outputs are optional. Stages shallow-copy the current dictionary and add their output. The state can also accumulate structured `pipeline_warnings` for recoverable reference failures.
+
+### Failure and evaluation semantics
+
+- `PipelineStageError` contains the stage, CVE ID, underlying exception type, and a safe message. Error serialization intentionally omits raw upstream exception messages.
+- NVD request/parsing, document embedding/filtering, formatter preconditions, and classifier invocation/output validation are terminal.
+- Reference scrape, chunk, and summary failures append structured `PipelineWarning` records and retain successful references.
+- Classifier labels must be a non-empty list of allowed unique strings. `NONE` cannot coexist with a real label. These rules apply to active, no-RAG, confidence, and self-consistency variants.
+- A successful state with warnings logs as `degraded`; without warnings it logs as `success`; a terminal exception logs as `error` with compatibility fields `error_message` and `["ERROR"]`.
+- Aggregate metrics score successful and degraded states, exclude errors, and include `total`, `scored`, `successful`, `degraded`, `failed`, and `complete`.
 
 ### Replay experiment
 
@@ -99,16 +114,18 @@ Because this replay starts from `nvd_filtered_chunks`, it does not construct or 
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
 - Local observation on 2026-08-29: `uv 0.11.26`, Python `3.14.6`, 101 installed packages, dependency check clean, and runtime imports successful.
 - Local observation on 2026-08-29: the `.env` contains the chat host/token names but not the two embedding variable names required by the full live entry point. Values were not displayed. Recheck rather than assuming this remains true.
+- `.env` is now resolved relative to the repository root. Live validation requires chat and embedding settings; replay validation can omit embeddings. Missing-setting errors contain names only.
+- The repository now has 33 offline standard-library `unittest` cases covering configuration, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
 
 ## Documentation inconsistencies
 
 - `README.md` is only a short project motivation. It contains no setup, configuration, run, test, architecture, taxonomy, evaluation, or output documentation.
 - The current README no longer embeds `imgs/system.png`; an earlier revision did.
-- `imgs/system.png` is stale: it omits explicit chunking, NVD reference ranking, embeddings, benchmark parallelism, and evaluation metrics.
+- `imgs/system.png` is stale: it omits explicit chunking, NVD reference ranking, embeddings, the benchmark runner, failure/degraded states, and evaluation metrics.
 - Scraper documentation says references are randomly shuffled, but the current function does not shuffle them; it processes NVD-ranked order.
 - Several stage docstrings call ordinary callable stages “LangGraph nodes” even though `main` uses LangChain sequencing.
 - `src/test.py` is named like an automated test but is a manually configured experiment.
-- `nvd_caller` documents raising HTTP errors, but catches every exception and returns fallback state instead.
+- Some NVD docstrings still mention raw HTTP errors even though the implementation now wraps request/parsing errors in `PipelineStageError`.
 
 ## Two-branch review
 
@@ -123,13 +140,12 @@ The graph branch descends from the linear history, removes the sequential entry 
 Useful ideas that may be selectively ported to the linear implementation:
 
 - prompts isolated in `src/Definitions/prompts.py`;
-- local `random.Random` instances per evaluation;
 - batched embedding/filter requests across references;
 - batched summarization requests;
 - retry/backoff around NVD HTTP work;
-- explicit error propagation instead of silently predicting `NONE`;
+- explicit error propagation instead of silently predicting `NONE` (ported in the first reliability batch);
 - per-origin coordination for concurrent scraping;
-- `zero_division=0` in metric calls.
+- `zero_division=0` in metric calls (ported in the first reliability batch).
 
 Do not port these blindly. The graph branch also has material problems:
 
@@ -149,105 +165,39 @@ Priority meanings:
 - **P1**: likely degrades classification quality, benchmark validity, or operational cost substantially.
 - **P2**: maintainability, observability, performance, or reproducibility debt that should be addressed deliberately.
 
-### P0 — Silent failures become ordinary predictions
+### Resolved P0 — Failure semantics, coverage, configuration, and cosine correctness
 
-Evidence:
+Implemented in the first reliability batch:
 
-- `nvd_caller` catches every exception and returns `nvd_description = "No description found"` with no references.
-- summarizers catch each LLM failure, omit the affected summary, and continue.
-- `CVEClassifierNode` and `CVENoRagClassifierNode` catch classification exceptions and return `cve_labels = ["NONE"]`.
-- `run_evaluation` therefore often records a successful CVE instead of an error, even when a critical upstream/model stage failed.
+- Operational/model failures no longer become ordinary `NONE` predictions. Terminal stages raise `PipelineStageError`; reference-local failures become warnings and degraded results.
+- Classifier output validation enforces allowed, non-empty, unique labels and mutual exclusion for `NONE`.
+- Per-CVE logs expose success/degraded/error state, warnings, and structured error details. Aggregate output exposes coverage and cannot mark a partial run complete.
+- `.env` discovery is repository-root anchored and mode-aware validation occurs before live client construction.
+- Query and document embeddings are L2-normalized. Zero document vectors score zero; zero query vectors, non-finite data, count mismatches, and dimension mismatches fail explicitly.
+- Regression tests use deliberately unnormalized embeddings and model/NVD failures to pin these behaviors.
 
-Impact:
+Remaining follow-up: the fixed `0.6` threshold must be recalibrated on pinned artifacts because correcting the math changes its meaning when an endpoint previously returned unnormalized vectors.
 
-- Infrastructure/model failures are indistinguishable from a genuine “no supported category” result.
-- Reliability cannot be measured from the output logs.
-- Metrics can be biased and debugging becomes guesswork.
+### P1 — Live acquisition still lacks caching, throttling, and retry policy
 
-Approach:
+The old eight-run/160-NVD-request burst is resolved: the default now makes one stable-order pass and at most one NVD request per benchmark CVE. The previous eight files were never averaged, so temperature zero plus one run matches the confirmed intent.
 
-- Define explicit stage error types and a run policy for retryable, skippable, and terminal failures.
-- Reserve `NONE` for a successful evidence-based classification.
-- Record stage/status/error metadata separately and include coverage/error rates in evaluation summaries.
+Remaining evidence:
 
-### P0 — Full default execution creates an uncontrolled request burst
-
-Evidence:
-
-- Eight threads each query NVD for the same 20 CVEs: up to 160 NVD requests before considering retries.
-- Every run also re-scrapes reference websites and repeats embeddings, summaries, and classifications.
-- There is no NVD API key support, cross-thread limiter, response cache, or retry/backoff on `main`.
-- Shuffling CVE order changes ordering but not request volume or rate.
+- A full benchmark still performs 20 fresh NVD requests and repeats page, embedding, summary, and classification work on every invocation.
+- There is no NVD API-key support, bounded retry/backoff, shared limiter, response cache, or persistent preprocessing artifact.
+- Reference sites and model endpoints have no explicit service-specific concurrency/rate/cost policy.
 
 Impact:
 
-- Avoidable throttling/blocking, inconsistent data, high latency, unnecessary model cost, and load on third-party sites.
-- Repeated evaluations confound model stochasticity with changing acquisition results.
+- Transient failures become correctly visible but are not retried.
+- Runs remain slow, externally mutable, and unnecessarily expensive to repeat.
 
 Approach:
 
 - Fetch and persist deterministic source/preprocessing artifacts once per CVE.
-- Add API-key-aware NVD headers, bounded retry/backoff, and a shared rate limiter.
-- Run repeated stochastic evaluation only from a pinned artifact stage.
-- NVD documentation confirms that excessive access can trigger throttling/blocking and that API keys affect allowed volume: https://nvd.nist.gov/developers/request-an-api-key and https://nvd.nist.gov/general/FAQ-Sections/General-FAQs.
-
-### P0 — “Cosine” filtering is only a dot product
-
-Evidence:
-
-- `CosineFilterNode` computes `np.dot(chunk_embeddings, query_embedding)`.
-- Neither vector set is normalized by the node.
-- Correctness therefore depends on an undocumented property of the embedding server/model.
-
-Impact:
-
-- Vector magnitude can dominate semantic direction.
-- The fixed `0.6` threshold is not portable across providers/configurations and may admit or reject the wrong chunks.
-
-Approach:
-
-- L2-normalize both query and document matrices in the node or use a tested cosine-similarity implementation.
-- Handle zero vectors and add deterministic unit tests with deliberately unnormalized embeddings.
-- Recalibrate thresholds using the benchmark after fixing the math.
-
-### P0 — Live configuration fails late and unclearly
-
-Evidence:
-
-- `config.py` loads relative `.env` values without validating them.
-- The entry point interpolates missing hosts into strings such as `http://None/v1`.
-- A missing embedding token currently raises during `OpenAIEmbeddings` client construction.
-- Running outside the repository root can prevent `.env` discovery.
-
-Impact:
-
-- Failures occur after program startup with provider-specific messages rather than actionable configuration errors.
-
-Approach:
-
-- Introduce a typed settings object with mode-specific validation.
-- Validate only the services needed for the selected resume stage.
-- Resolve `.env` relative to the repository/config file or accept an explicit path.
-
-### P0 — Evaluation coverage and failures are misreported
-
-Evidence:
-
-- Aggregate metrics include only CVEs appended after a nominally successful invocation.
-- CVEs caught by `run_evaluation` are absent from aggregate scoring.
-- Earlier stage/model errors converted to `NONE` are included as if classification succeeded.
-- Individual prediction cleaning and grouped prediction handling are inconsistent.
-
-Impact:
-
-- A run with failures can appear better than a complete run.
-- Scores from different runs may cover different samples and are not directly comparable.
-
-Approach:
-
-- Report requested, successful, failed, and scored sample counts.
-- Define whether terminal failures score as incorrect or are reported separately, then apply one policy consistently.
-- Use one validation/binarization path for individual and grouped metrics.
+- Add API-key-aware NVD headers, bounded retry/backoff, a shared rate limiter, and explicit timeouts/content limits.
+- Run any future stochastic or prompt comparison from the same pinned artifact stage.
 
 ### P1 — Semantic chunking is unusually aggressive
 
@@ -340,22 +290,19 @@ Approach:
 - Normalize a richer source record before scraping.
 - Prefer structured evidence as grounding, while treating CWE mappings as evidence rather than infallible labels.
 
-### P1 — Classifier output invariants are incomplete
+### P1 — Classification remains unauditable beyond label validation
 
 Evidence:
 
-- The JSON schema has no `uniqueItems` constraint.
-- It permits `NONE` alongside real labels.
 - Basic classifier output contains labels only, with no evidence, confidence, or provenance.
 - The self-consistency experiment returns every label seen at least once across five calls; it calculates frequency but applies no acceptance threshold.
 
 Impact:
 
-- Invalid combinations, duplicates, unauditable predictions, and reduced precision in the self-consistency path.
+- Predictions remain difficult to audit, and the self-consistency experiment can reduce precision.
 
 Approach:
 
-- Normalize/deduplicate outputs and enforce `NONE` exclusivity.
 - Require evidence references for every selected label.
 - If self-consistency is retained, define and validate a frequency threshold and failure policy.
 
@@ -383,39 +330,38 @@ Approach:
 - Track per-label precision/recall/F1, exact match, sample-F1, Hamming loss, coverage, latency, and cost.
 - Separate development and held-out cases; include newer/less-famous CVEs and optionally mask the CVE ID in retrieval ablations.
 
-### P2 — Reproducibility and cross-run analysis are limited
+### P2 — Reproducibility remains best-effort
 
 Evidence:
 
-- Threads share the global `random` module after one `random.seed(42)` call; interleaving can change sampling order.
+- The active benchmark is now one insertion-order run with both chat temperatures set to zero.
 - Acquisition results can change between repeated evaluations.
-- The script does not compute mean, standard deviation, confidence interval, label stability, or aggregate cost across the eight run files.
+- Provider implementations may still vary at temperature zero, and the run does not capture artifact/config hashes or source timestamps.
 - Run metadata says `RUN_N + 1` while filenames are zero-based.
 
 Approach:
 
-- Use a local RNG per run and record seeds.
-- Evaluate repetitions from the same versioned input artifact.
-- Add a cross-run report with variability and coverage.
+- Pin acquisition/preprocessing artifacts and record their versions/hashes.
+- If repeated evaluation is reintroduced, run it from the same artifact and add an explicit cross-run stability report.
 
-### P2 — Work is sequential inside each CVE but over-parallelized across full runs
+### P2 — Work is fully sequential and unbatched
 
 Evidence:
 
 - Scraping is sequential per CVE.
 - Filtering sends one embedding request per reference.
 - Summarization sends one LLM request per reference.
-- Eight complete pipelines run concurrently and share model/pipeline objects.
+- CVEs are processed sequentially in one run.
 
 Impact:
 
-- Poor batching efficiency combined with high uncontrolled external concurrency.
+- Correct but potentially high latency and poor endpoint utilization.
 
 Approach:
 
 - Make concurrency explicit per external service, with independent bounded limits.
 - Batch compatible embeddings/model calls.
-- Prefer parallelism across cached CVEs/stages rather than eight redundant acquisition runs.
+- Add bounded parallelism only after caching, retry, and service-specific rate policies exist.
 
 ### P2 — Logging is expensive and weakly identified
 
@@ -437,8 +383,7 @@ Approach:
 Evidence:
 
 - Models, thresholds, run counts, endpoints, and log directory names are code constants.
-- Pipeline construction lives under `if __name__ == "__main__"` and is not exposed as a reusable factory.
-- Benchmark execution, external clients, orchestration, scoring, and persistence share one module.
+- `build_pipeline()` is now reusable and `main()` is testable, but benchmark execution, scoring, persistence, and live construction still share one module.
 - `src/test.py` duplicates runner/logging code.
 
 Approach:
@@ -455,7 +400,7 @@ Evidence:
 - Prompts are embedded in large classes, making versioning and prompt-only tests difficult.
 - The entry points use wildcard evaluator imports.
 - Broad exceptions obscure expected failure modes.
-- There are no unit, integration, contract, or snapshot tests.
+- The 33-case offline unit regression suite covers the first reliability batch, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
 - Dependencies are unpinned and not reproducibly locked.
 
 Approach:
@@ -469,30 +414,27 @@ Approach:
 
 Do not start all of these at once. Keep each unit reviewable and measure behavior after each quality-affecting change.
 
-1. **Baseline and contracts**
-   - Add fast unit tests for metrics, NVD parsing/ranking, chunk/filter behavior, formatter output, classifier normalization, and state loading using fakes/fixtures.
-   - Define stage status/error semantics and a versioned artifact manifest.
-   - Record the unchanged current benchmark as a baseline before correcting annotations.
-2. **Configuration and error correctness**
-   - Add typed, mode-aware settings and fail-fast validation.
-   - Stop converting operational errors to `NONE`; report coverage and failures.
-   - Enforce classifier output invariants.
+1. **Completed reliability foundation**
+   - Added 33 offline unit tests for evaluator/runner, configuration, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
+   - Defined terminal error and degraded-warning semantics, fail-fast mode-aware configuration, classifier invariants, deterministic single-run behavior, coverage reporting, and correct cosine normalization.
+   - Still needed from the original contract work: a versioned artifact manifest and controlled integration fixtures.
+2. **Reliable acquisition and artifacts — recommended next**
+   - Add NVD key support, bounded retry/backoff, shared rate limiting, English-description selection, richer structured fields, caching, and provenance.
+   - Add safe bounded scraping with content-type/size validation.
+   - Define versioned resume artifacts before optimizing prompts/retrieval against mutable live inputs.
 3. **Reusable pipeline and benchmark split**
    - Extract model/stage factories and a reusable single/batch classify API.
    - Build a separate benchmark runner on top.
    - Replace `src/test.py` with named resume-stage behavior.
-4. **Reliable acquisition and artifacts**
-   - Add NVD key support, bounded retry/backoff, shared rate limiting, English-description selection, richer structured fields, caching, and provenance.
-   - Add safe bounded scraping with content/size validation.
-5. **Retrieval and evidence quality experiments**
-   - Fix cosine math first.
+4. **Retrieval and evidence quality experiments**
    - Evaluate chunkers, target-specific retrieval, top-k/token limits, batching, and structured evidence extraction one variable at a time.
    - Add prompt-injection tests and preserve source citations.
-6. **Benchmark audit and reporting**
+   - Recalibrate the existing `0.6` cosine threshold on pinned inputs before interpreting comparison results.
+5. **Benchmark audit and reporting**
    - Resolve annotation contradictions with explicit rules.
    - Expand label/negative coverage and add held-out evaluation.
    - Add per-label, exact-match, stability, latency, and cost reporting.
-7. **Only then consider larger structural cleanup**
+6. **Only then consider larger structural cleanup**
    - Neutral module names, packaging, prompt modules, dependency locking, CI, and optional taxonomy interfaces.
    - Do not adopt LangGraph merely to reuse graph-branch improvements.
 
@@ -500,13 +442,11 @@ Do not start all of these at once. Keep each unit reviewable and measure behavio
 
 These are proposals, not authorization to edit production code:
 
-1. Unit tests for `CosineFilterNode`, evaluators, formatter, and classifier normalization using fake embeddings/models.
-2. Correct cosine normalization plus threshold-regression tests.
-3. Explicit error/status model that separates operational failure from `NONE`.
-4. Typed configuration validation with separate requirements for live and replay modes.
-5. Versioned stage-artifact schema and parameterized replay loader.
-
-The first two units are narrow and high-value, but changing cosine behavior can change benchmark results and must be discussed before implementation.
+1. NVD client hardening: English description selection, API-key support, explicit retryable statuses, bounded exponential backoff, and shared rate limiting.
+2. Versioned stage-artifact schema plus a parameterized loader for named resume stages.
+3. Bounded scraper policy for URL scheme, response/content type, downloaded size, and per-origin coordination.
+4. Cached retrieval-quality harness to recalibrate cosine threshold and compare chunk/query/top-k choices without live-source drift.
+5. Benchmark annotation audit and negative/per-label coverage plan before changing `CVE_TEST`.
 
 ## Open questions for future work
 
@@ -535,6 +475,18 @@ The first two units are narrow and high-value, but changing cosine behavior can 
 - Did not call NVD, fetch reference pages, invoke embedding/chat models, or expose credentials.
 - Created and committed `AGENTS.md` as `c95e0f0`.
 - Created this persistent review/memory file as the second documentation unit.
+
+### 2026-08-29 — First reliability and correctness batch
+
+- `390d6c8` added the offline standard-library regression harness.
+- `db3ee28` added repository-root `.env` loading and live/replay configuration validation.
+- `fea9fb0` added `PipelineStageError`, stage-dependent optional state, terminal failure propagation, and classifier output validation across all variants.
+- `4ec8df2` added structured reference warnings, degraded results, structured terminal errors, metric coverage fields, and `zero_division=0`.
+- `50b752a` removed the eight outer executions, shuffle, and executor from the active runner; added `build_pipeline()`/`main()`; and set summarizer/classifier temperatures to `0.0`.
+- `9a3a704` implemented L2-normalized cosine similarity with zero-vector, non-finite, count, and dimension handling.
+- Final offline suite at the code snapshot: 33 tests passing. Python compilation and `uv pip check` passed.
+- Taxonomy, benchmark fixture, prompts, threshold `0.6`, semantic threshold `25`, retrieval query, dependencies, and runtime artifact path/schema were deliberately left unchanged.
+- No NVD request, page scrape, embedding request, chat/LLM request, Hugging Face Hub operation, or credential disclosure occurred during implementation or verification.
 
 ## Notes maintenance checklist
 

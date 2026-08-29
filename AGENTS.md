@@ -18,11 +18,13 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `requirements.txt`: unpinned dependency ranges. There is no `pyproject.toml`, lockfile, package metadata, or CI configuration.
 - `src/CVE_expert_seq.py`: active entry point and benchmark runner for the full live linear pipeline.
 - `src/test.py`: replay experiment that reads a previous JSON log and reruns later stages. It is not an automated test and currently contains a machine-specific absolute path.
-- `src/Definitions/config.py`: constants, model names, and `.env` loading.
+- `src/Definitions/config.py`: constants, model names, repository-root `.env` loading, and mode-aware runtime validation.
 - `src/Definitions/const.py`: the 20-CVE hand-labeled benchmark fixture.
 - `src/Definitions/labels.py`: flat label definitions plus an unused-on-main hierarchical tree.
 - `src/Graph/state.py`: shared `CVEClassifierState` `TypedDict`.
+- `src/Graph/errors.py`: terminal `PipelineStageError` and recoverable `PipelineWarning` records.
 - `src/Graph/Nodes/`: reusable pipeline stages. The `Graph` name and several LangGraph-oriented docstrings are historical; these objects are also used as ordinary LangChain callables.
+- `tests/`: standard-library `unittest` regression suite. Tests use fakes and must remain offline.
 - `imgs/system.png`: an older high-level architecture diagram that omits some current stages.
 - `logs/`: ignored runtime artifacts; full runs rewrite one JSON file per evaluation after every CVE.
 - `.env`: ignored local credentials and endpoints. Never print, commit, or paste its values.
@@ -38,9 +40,13 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 5. `CVEAwareSummarizerNode` asks the chat model for one structured summary per retained reference.
 6. `formatter` combines the NVD description and summaries into the classifier context stored as `rag`.
 7. `CVEClassifierNode` returns structured flat labels from `LABELS_DESCRIPTIONS` plus `NONE`.
-8. `run_evaluation` compares predictions with `CVE_TEST`, records per-CVE metrics, and writes a run log.
+8. `run_evaluation` compares predictions with `CVE_TEST`, records per-CVE metrics and coverage, and writes a run log.
 
-The script currently starts eight evaluation threads. Each thread independently processes all benchmark CVEs through the complete live acquisition and model pipeline. Do not assume that repeated runs share cached NVD responses, pages, chunks, summaries, or embeddings.
+`main()` builds the pipeline once and processes `CVE_TEST` once in insertion order. The summarizer and classifier both use temperature `0.0`; this reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, retry policy, coordinated throttling, or batching.
+
+Terminal NVD, filtering, formatter-precondition, or classifier failures raise `PipelineStageError`; they must never be converted to `NONE`. A successful, validated model response may return `["NONE"]`. Individual reference scrape, chunk, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`.
+
+Run logs retain the existing `logs/LOG_GPT_NORANDAware/RUN_0.json` location and artifact fields. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Aggregate metrics score successful and degraded classifications, exclude terminal errors, and report `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields.
 
 ### State fields
 
@@ -54,8 +60,9 @@ Stages shallow-copy and extend a dictionary matching `CVEClassifierState`. In no
 - Summarization: `summaries`
 - Formatting: `rag`
 - Classification: `cve_labels`; optional classifier variants may also add `labels_motivation` and `labels_confidence`
+- Recoverable work at any reference stage: optional `pipeline_warnings`
 
-Although the `TypedDict` marks all fields as required, real pipeline invocations begin with only `cve_id`. Keep this mismatch in mind when adding type checking or stage validation.
+`CVEClassifierState` requires only `cve_id`; later fields are optional because they appear stage by stage. Formatting and classification validate their required preconditions at runtime.
 
 ## Environment and dependencies with `uv`
 
@@ -81,7 +88,7 @@ source .venv/bin/activate
 python src/CVE_expert_seq.py
 ```
 
-Always run from the repository root. `config.py` loads `.env` using a relative path, and the source imports rely on `src` being placed on `sys.path` by running a file under `src/`.
+Run project commands from the repository root. `config.py` resolves `.env` from that root even if the launch directory differs. Source imports still rely on `src` being placed on `sys.path` by running a file under `src/` or setting `PYTHONPATH=src` for module-based checks.
 
 `requirements.txt` contains broad ranges and omits some directly imported packages that currently arrive transitively, including `langchain-core`, `langchain-text-splitters`, `numpy`, `requests`, and `tqdm`. It also includes packages unused by the selected live path. Do not silently regenerate dependencies or create a lockfile as part of an unrelated change.
 
@@ -102,22 +109,24 @@ The code prepends `http://` and appends `/v1`; do not include a scheme or `/v1` 
 
 The replay path can avoid the embedding endpoint when a previous artifact already contains filtered chunks. `src/test.py` currently resumes from `nvd_filtered_chunks` and therefore only constructs chat-model clients, but its `LOG_FILE_PATH` must first be replaced or parameterized to point to a compatible local run artifact. Future replay work should support explicit, versioned resume stages rather than more hard-coded paths.
 
-Do not log credentials. When diagnosing configuration, report only whether each required setting is present, never its value. Note that the current implementation does not validate configuration before client construction.
+`validate_runtime_config(require_embedding=True)` checks all four settings before the live pipeline constructs clients. Replay calls it with `require_embedding=False`, so only chat settings are required. `RuntimeConfigurationError` reports missing variable names without their values.
+
+Do not log credentials. When diagnosing configuration, report only whether each required setting is present, never its value.
 
 ## Running and verification
 
-There is no automated test suite. `python -m unittest discover` currently discovers zero tests, and `src/test.py` must not be described or run as a unit test.
+The offline regression suite uses standard-library `unittest`. `src/test.py` is still a manually configured replay experiment and must not be described as a unit test.
 
 Safe local checks that do not call external services:
 
 ```bash
-uv run --python .venv/bin/python python -m compileall -q src
-PYTHONPATH=src uv run --python .venv/bin/python python -c "from Definitions.labels import ALL_LABELS; from Graph.Nodes.evaluators import compute_individual_scores; print(compute_individual_scores(['XSS'], ['XSS'], ALL_LABELS))"
-uv pip check --python .venv/bin/python
+PYTHONPATH=src uv run --python .venv/bin/python python -m unittest discover -s tests -v
+uv run --python .venv/bin/python python -m compileall -q src tests
+uv pip check
 git diff --check
 ```
 
-Run live NVD, scraping, embedding, or LLM workflows only when the user explicitly authorizes the external calls and their likely cost/rate impact. A full default run is much larger than a one-CVE smoke test because it executes the complete 20-CVE benchmark eight times.
+Run live NVD, scraping, embedding, or LLM workflows only when the user explicitly authorizes the external calls and their likely cost/rate impact. A default live benchmark performs one sequential pass over 20 CVEs and can still make many reference, embedding, summarization, and classification calls.
 
 ## Development conventions
 
@@ -129,6 +138,7 @@ Run live NVD, scraping, embedding, or LLM workflows only when the user explicitl
 - Preserve source provenance through retrieval, summarization, classification, and logs when adding new data flows.
 - Avoid hard-coded absolute paths, run names, endpoint details, and concurrency values in new code.
 - Do not use wildcard imports in new code. Add explicit types and stage-level validation when touching relevant code.
+- Every commit should leave the offline `unittest` suite passing. Add regression coverage before or with a behavior fix.
 - Never commit `.env`, runtime logs, model caches, downloaded weights, or credentials.
 - Do not modify or delete existing user logs or local artifacts unless requested.
 - Keep `AGENT_NOTES.md` current as work progresses.
