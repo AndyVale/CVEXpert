@@ -1,4 +1,28 @@
-from typing import Any
+from typing import Any, TypedDict
+
+
+class PipelineWarning(TypedDict):
+    """A recoverable failure affecting one external reference."""
+
+    stage: str
+    source: str
+    error_type: str
+    message: str
+
+
+def make_pipeline_warning(
+    *,
+    stage: str,
+    source: str,
+    error: BaseException,
+    safe_message: str,
+) -> PipelineWarning:
+    return {
+        "stage": stage,
+        "source": source,
+        "error_type": type(error).__name__,
+        "message": safe_message,
+    }
 
 
 class PipelineStageError(RuntimeError):

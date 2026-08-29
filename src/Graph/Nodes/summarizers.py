@@ -1,5 +1,22 @@
 from tqdm import tqdm
+from Graph.errors import make_pipeline_warning
 from Graph.state import CVEClassifierState
+
+
+def _validate_summary_response(response) -> tuple[bool, str]:
+    if not isinstance(response, dict):
+        raise TypeError("Summarizer result must be an object")
+
+    is_cve_related = response.get("is_cve_related")
+    summary = response.get("summary")
+    if not isinstance(is_cve_related, bool):
+        raise TypeError("Summarizer result must include a boolean is_cve_related")
+    if not isinstance(summary, str):
+        raise TypeError("Summarizer result must include a string summary")
+    if is_cve_related and not summary.strip():
+        raise ValueError("Related reference summary must not be empty")
+    return is_cve_related, summary.strip()
+
 
 class ReferenceSummarizerNode:
     """
@@ -95,6 +112,7 @@ EXTRACTED TEXT TO ANALYZE:
         """
         filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
         summaries_dict = {}
+        warnings = list(state.get("pipeline_warnings", []))
 
         if not filtered_chunks_dict:
             return {**state, "summaries": {}}
@@ -109,18 +127,27 @@ EXTRACTED TEXT TO ANALYZE:
             
             try:
                 response = self.struct_model.invoke(self._get_prompt(text_to_analyze))
-                
-                if response and response.get("is_cve_related") and response.get("summary"):
-                    summaries_dict[url] = response["summary"].strip()
+                is_cve_related, summary = _validate_summary_response(response)
+
+                if is_cve_related:
+                    summaries_dict[url] = summary
 
                 # print("Summarization completed")
                 
-            except Exception as e:
-                print(f"Error during structured summarization for {url}: {e}")
+            except Exception as error:
+                warnings.append(
+                    make_pipeline_warning(
+                        stage="summarize",
+                        source=url,
+                        error=error,
+                        safe_message="Reference summarization failed",
+                    )
+                )
                 continue
 
         return {**state,
-                "summaries": summaries_dict}
+                "summaries": summaries_dict,
+                "pipeline_warnings": warnings}
 
 class CVEAwareSummarizerNode:
     """
@@ -221,6 +248,7 @@ EXTRACTED TEXT TO ANALYZE:
         """
         filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
         summaries_dict = {}
+        warnings = list(state.get("pipeline_warnings", []))
         
         # Extract context from state
         cve_id = state["cve_id"]
@@ -241,16 +269,25 @@ EXTRACTED TEXT TO ANALYZE:
                 prompt = self._get_prompt(text_to_analyze, cve_id, nvd_description)
                 
                 response = self.struct_model.invoke(prompt)
-                
-                if response and response.get("is_cve_related") and response.get("summary"):
-                    summaries_dict[url] = response["summary"].strip()
-                
-            except Exception as e:
-                print(f"Error during structured summarization for {url}: {e}")
+                is_cve_related, summary = _validate_summary_response(response)
+
+                if is_cve_related:
+                    summaries_dict[url] = summary
+
+            except Exception as error:
+                warnings.append(
+                    make_pipeline_warning(
+                        stage="summarize",
+                        source=url,
+                        error=error,
+                        safe_message="CVE-aware reference summarization failed",
+                    )
+                )
                 continue
 
         return {**state,
-                "summaries": summaries_dict}
+                "summaries": summaries_dict,
+                "pipeline_warnings": warnings}
 
 class NoSummarizerNode:
     """
@@ -281,20 +318,31 @@ class NoSummarizerNode:
         """
         filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
         summaries_dict = {}
+        warnings = list(state.get("pipeline_warnings", []))
 
         if not filtered_chunks_dict:
             return {**state, "summaries": {}}
 
         for url, chunks in filtered_chunks_dict.items():
+            try:
+                valid_chunks = [c for c in chunks if c != "..."]
+                if not valid_chunks:
+                    continue
 
-            valid_chunks = [c for c in chunks if c != "..."]
-            if not valid_chunks:
-                continue
-            
-            concatenated_text = "\n\n".join(valid_chunks).strip()
-            
-            if concatenated_text:
-                summaries_dict[url] = concatenated_text
+                concatenated_text = "\n\n".join(valid_chunks).strip()
+
+                if concatenated_text:
+                    summaries_dict[url] = concatenated_text
+            except Exception as error:
+                warnings.append(
+                    make_pipeline_warning(
+                        stage="summarize",
+                        source=url,
+                        error=error,
+                        safe_message="Reference concatenation failed",
+                    )
+                )
 
         return {**state,
-                "summaries": summaries_dict}
+                "summaries": summaries_dict,
+                "pipeline_warnings": warnings}

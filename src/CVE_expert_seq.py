@@ -24,6 +24,24 @@ from Graph.Nodes.summarizers import CVEAwareSummarizerNode
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
+from Graph.errors import PipelineStageError
+
+
+def _serialize_pipeline_error(error, cve_id):
+    if isinstance(error, PipelineStageError):
+        return error.to_dict(), str(error)
+
+    details = {
+        "stage": "pipeline",
+        "cve_id": cve_id,
+        "error_type": type(error).__name__,
+        "message": "Unexpected pipeline failure",
+    }
+    safe_message = (
+        f"pipeline stage failed for {cve_id}: "
+        f"Unexpected pipeline failure ({details['error_type']})"
+    )
+    return details, safe_message
 
 def run_evaluation(args):
     """
@@ -73,9 +91,12 @@ def run_evaluation(args):
             t = time.time() - t
             predicted_labels = state["cve_labels"]
             individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
+            pipeline_warnings = list(state.get("pipeline_warnings", []))
+            status = "degraded" if pipeline_warnings else "success"
 
             log["cves"][cve] = {
-                "status": "success",
+                "status": status,
+                "pipeline_warnings": pipeline_warnings,
                 "nvd_description": state.get("nvd_description", ""),
                 "nvd_references_pages": state.get("nvd_references_pages", {}),
                 "nvd_references_chunks": state.get("nvd_references_chunks", {}),
@@ -93,12 +114,14 @@ def run_evaluation(args):
             all_y_true.append(expected_labels)
             all_y_pred.append(predicted_labels)
 
-        except Exception as e:
-            error_msg = str(e)
+        except Exception as error:
+            error_details, error_msg = _serialize_pipeline_error(error, cve)
             print(f"[Run {RUN_N}] ERROR on {cve}: {error_msg}")
             
             log["cves"][cve] = {
                 "status": "error",
+                "pipeline_warnings": [],
+                "error": error_details,
                 "error_message": error_msg,
                 "expected_labels": expected_labels,
                 "classification_output": ["ERROR"]
@@ -109,15 +132,44 @@ def run_evaluation(args):
 
         print(f"[Run {RUN_N}] Log updated for {cve}")
 
+    aggregation_complete = True
     if all_y_true and all_y_pred:
         try:
-            grouped_scores = compute_grouped_scores(all_y_true, all_y_pred, ALL_LABELS)
-            log["aggregated_scores"] = grouped_scores
+            log["aggregated_scores"] = compute_grouped_scores(
+                all_y_true,
+                all_y_pred,
+                ALL_LABELS,
+            )
         except Exception as e:
             print(f"[Run {RUN_N}] Error computing aggregated scores: {e}")
-            log["aggregated_scores"] = {"error": str(e)}
+            aggregation_complete = False
+            log["aggregated_scores"] = {
+                "error": "Aggregate metric computation failed",
+                "error_type": type(e).__name__,
+            }
     else:
         log["aggregated_scores"] = {"note": "No successful predictions to aggregate."}
+
+    statuses = [entry["status"] for entry in log["cves"].values()]
+    total = len(CVE_TEST)
+    scored = len(all_y_true)
+    successful = statuses.count("success")
+    degraded = statuses.count("degraded")
+    failed = statuses.count("error")
+    log["aggregated_scores"].update(
+        {
+            "total": total,
+            "scored": scored,
+            "successful": successful,
+            "degraded": degraded,
+            "failed": failed,
+            "complete": (
+                aggregation_complete
+                and failed == 0
+                and scored == total
+            ),
+        }
+    )
     
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2)

@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from Definitions import config
 from Definitions.labels import ALL_LABELS
+from Graph.errors import PipelineStageError
 from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_scores
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.util import StateFromFileLoader
@@ -78,7 +79,10 @@ class FakePipeline:
     def invoke(self, state):
         cve_id = state["cve_id"]
         self.invocations.append(cve_id)
-        return {"cve_id": cve_id, **self.states[cve_id]}
+        result = self.states[cve_id]
+        if isinstance(result, BaseException):
+            raise result
+        return {"cve_id": cve_id, **result}
 
 
 class EvaluatorTests(unittest.TestCase):
@@ -100,6 +104,14 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual(scores["precision"], 1.0)
         self.assertEqual(scores["recall"], 1.0)
         self.assertEqual(scores["f1"], 1.0)
+
+    def test_empty_prediction_scores_zero_without_metric_failure(self):
+        scores = compute_individual_scores(["XSS"], [], ALL_LABELS)
+
+        self.assertEqual(
+            scores,
+            {"precision": 0.0, "recall": 0.0, "f1": 0.0},
+        )
 
 
 class FormatterTests(unittest.TestCase):
@@ -212,6 +224,90 @@ class RunnerTests(unittest.TestCase):
             ["XSS"],
         )
         self.assertEqual(log["aggregated_scores"]["f1"], 1.0)
+
+    def test_run_reports_degraded_and_terminal_error_coverage(self):
+        test_cves = {
+            "CVE-SUCCESS": ["XSS"],
+            "CVE-DEGRADED": ["SQLi"],
+            "CVE-ERROR": ["XSS"],
+        }
+        warning = {
+            "stage": "scrape",
+            "source": "https://failed.example.test",
+            "error_type": "TimeoutError",
+            "message": "Reference download or text extraction failed",
+        }
+        pipeline = FakePipeline(
+            {
+                "CVE-SUCCESS": {
+                    "nvd_description": "Description",
+                    "summaries": {},
+                    "rag": "Context",
+                    "cve_labels": ["XSS"],
+                },
+                "CVE-DEGRADED": {
+                    "nvd_description": "Description",
+                    "summaries": {"url": "Usable evidence"},
+                    "rag": "Context with usable evidence",
+                    "cve_labels": ["SQLi"],
+                    "pipeline_warnings": [warning],
+                },
+                "CVE-ERROR": PipelineStageError(
+                    stage="nvd",
+                    cve_id="CVE-ERROR",
+                    error=TimeoutError("upstream details"),
+                    safe_message="NVD request or response parsing failed",
+                ),
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_module_path = Path(temp_dir) / "src" / "CVE_expert_seq.py"
+            fake_module_path.parent.mkdir()
+            with (
+                patch.object(CVE_expert_seq, "__file__", str(fake_module_path)),
+                patch.object(CVE_expert_seq, "CVE_TEST", test_cves),
+                patch.object(
+                    CVE_expert_seq.random,
+                    "sample",
+                    return_value=list(test_cves.items()),
+                ),
+            ):
+                CVE_expert_seq.run_evaluation((0, pipeline, ["FakePipeline"]))
+
+            output_path = (
+                Path(temp_dir)
+                / "logs"
+                / "LOG_GPT_NORANDAware"
+                / "RUN_0.json"
+            )
+            log = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(log["cves"]["CVE-SUCCESS"]["status"], "success")
+        self.assertEqual(log["cves"]["CVE-DEGRADED"]["status"], "degraded")
+        self.assertEqual(
+            log["cves"]["CVE-DEGRADED"]["pipeline_warnings"],
+            [warning],
+        )
+        terminal_entry = log["cves"]["CVE-ERROR"]
+        self.assertEqual(terminal_entry["status"], "error")
+        self.assertEqual(terminal_entry["classification_output"], ["ERROR"])
+        self.assertEqual(terminal_entry["error"]["stage"], "nvd")
+        self.assertIn("error_message", terminal_entry)
+        self.assertEqual(
+            log["aggregated_scores"],
+            {
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "total": 3,
+                "scored": 2,
+                "successful": 1,
+                "degraded": 1,
+                "failed": 1,
+                "complete": False,
+            },
+        )
 
 
 if __name__ == "__main__":

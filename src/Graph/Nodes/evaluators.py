@@ -15,9 +15,9 @@ def compute_individual_scores(y_true, y_pred, all_labels):
     y_pred_bin = mlb.transform([y_pred_clean])
 
     scores = {
-        "precision": float(precision_score(y_true_bin, y_pred_bin, average="micro")),
-        "recall": float(recall_score(y_true_bin, y_pred_bin, average="micro")),
-        "f1": float(f1_score(y_true_bin, y_pred_bin, average="micro")),
+        "precision": float(precision_score(y_true_bin, y_pred_bin, average="micro", zero_division=0)),
+        "recall": float(recall_score(y_true_bin, y_pred_bin, average="micro", zero_division=0)),
+        "f1": float(f1_score(y_true_bin, y_pred_bin, average="micro", zero_division=0)),
     }
     return scores
 
@@ -32,8 +32,8 @@ def compute_grouped_scores(all_y_true, all_y_pred, all_labels):
     y_pred_bin = mlb.transform(all_y_pred)
 
     scores = {
-        "precision": float(precision_score(y_true_bin, y_pred_bin, average="micro")),
-        "recall": float(recall_score(y_true_bin, y_pred_bin, average="micro")),
-        "f1": float(f1_score(y_true_bin, y_pred_bin, average="micro")),
+        "precision": float(precision_score(y_true_bin, y_pred_bin, average="micro", zero_division=0)),
+        "recall": float(recall_score(y_true_bin, y_pred_bin, average="micro", zero_division=0)),
+        "f1": float(f1_score(y_true_bin, y_pred_bin, average="micro", zero_division=0)),
     }
     return scores

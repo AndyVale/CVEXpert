@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
+from Graph.errors import make_pipeline_warning
 from Graph.state import CVEClassifierState
 
 class RecursiveCharacterChunkerNode:
@@ -49,6 +50,7 @@ class RecursiveCharacterChunkerNode:
         """
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
+        warnings = list(state.get("pipeline_warnings", []))
 
         if not pages:
             return {**state, "nvd_references_chunks": {}}
@@ -60,13 +62,23 @@ class RecursiveCharacterChunkerNode:
             try:
                 # split_text returns a list of strings
                 chunks = self.splitter.split_text(text)
+                if not chunks:
+                    raise ValueError("Chunker returned no chunks")
                 chunks_dict[url] = chunks
-            except Exception as e:
-                print(f"Error during recursive character chunking for {url}: {e}")
+            except Exception as error:
                 chunks_dict[url] = []
+                warnings.append(
+                    make_pipeline_warning(
+                        stage="chunk",
+                        source=url,
+                        error=error,
+                        safe_message="Recursive character chunking failed",
+                    )
+                )
 
         return {**state,
-                "nvd_references_chunks": chunks_dict}
+                "nvd_references_chunks": chunks_dict,
+                "pipeline_warnings": warnings}
 
 class MarkdownChunkerNode:
     """
@@ -103,6 +115,7 @@ class MarkdownChunkerNode:
         """
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
+        warnings = list(state.get("pipeline_warnings", []))
 
         if not pages:
             return {**state, "nvd_references_chunks": {}}
@@ -113,13 +126,24 @@ class MarkdownChunkerNode:
 
             try:
                 documents = self.splitter.split_text(text)
-                chunks_dict[url] = [doc.page_content for doc in documents]
-            except Exception as e:
-                print(f"Error during markdown chunking for {url}: {e}")
+                chunks = [doc.page_content for doc in documents]
+                if not chunks:
+                    raise ValueError("Chunker returned no chunks")
+                chunks_dict[url] = chunks
+            except Exception as error:
                 chunks_dict[url] = []
+                warnings.append(
+                    make_pipeline_warning(
+                        stage="chunk",
+                        source=url,
+                        error=error,
+                        safe_message="Markdown chunking failed",
+                    )
+                )
 
         return {**state,
-                "nvd_references_chunks": chunks_dict}
+                "nvd_references_chunks": chunks_dict,
+                "pipeline_warnings": warnings}
 
 class SemanticChunkerNode:
     """
@@ -173,6 +197,7 @@ class SemanticChunkerNode:
         """
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
+        warnings = list(state.get("pipeline_warnings", []))
 
         if not pages:
             return {**state, "nvd_references_chunks": {}}
@@ -184,10 +209,20 @@ class SemanticChunkerNode:
             try:
                 # split_text returns a list of strings
                 chunks = self.splitter.split_text(text)
+                if not chunks:
+                    raise ValueError("Chunker returned no chunks")
                 chunks_dict[url] = chunks
-            except Exception as e:
-                print(f"Error during semantic chunking for {url}: {e}")
+            except Exception as error:
                 chunks_dict[url] = []
+                warnings.append(
+                    make_pipeline_warning(
+                        stage="chunk",
+                        source=url,
+                        error=error,
+                        safe_message="Semantic chunking failed",
+                    )
+                )
 
         return {**state,
-                "nvd_references_chunks": chunks_dict}
+                "nvd_references_chunks": chunks_dict,
+                "pipeline_warnings": warnings}

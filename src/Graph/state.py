@@ -1,5 +1,7 @@
 from typing import Required, TypedDict
 
+from Graph.errors import PipelineWarning
+
 
 class CVEClassifierState(TypedDict, total=False):
     """
@@ -19,6 +21,7 @@ class CVEClassifierState(TypedDict, total=False):
         cve_labels: The list of security labels assigned to the CVE.
         labels_motivation: A dictionary mapping each assigned label to its textual explanation/justification.
         labels_confidence: A dictionary mapping each assigned label to a confidence score (0.0 - 1.0).
+        pipeline_warnings: Recoverable per-reference failures accumulated by pipeline stages.
     """
     cve_id: Required[str]
     nvd_description: str
@@ -31,3 +34,4 @@ class CVEClassifierState(TypedDict, total=False):
     cve_labels: list[str]
     labels_motivation: dict[str, str]
     labels_confidence: dict[str, float]
+    pipeline_warnings: list[PipelineWarning]
