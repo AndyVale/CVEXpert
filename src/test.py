@@ -13,7 +13,7 @@ import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN_MODEL, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT_MODEL, VAST_IP_PORT_EMBEDDING
+from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN_MODEL, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT_MODEL, VAST_IP_PORT_EMBEDDING, validate_runtime_config
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.util import StateFromFileLoader
@@ -128,6 +128,7 @@ def run_evaluation(args):
     return f"Finished: Run {RUN_N}"
         
 if __name__ == "__main__":
+    validate_runtime_config(require_embedding=False)
     PARALLEL_EXECUTION = 8
     random.seed(42)
     VAST_HOST = f"http://{VAST_IP_PORT_MODEL}/v1"

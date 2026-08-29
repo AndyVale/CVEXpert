@@ -4,12 +4,70 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from Definitions import config
 from Definitions.labels import ALL_LABELS
 from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_scores
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.util import StateFromFileLoader
 
 import CVE_expert_seq
+
+
+class RuntimeConfigurationTests(unittest.TestCase):
+    def test_dotenv_path_is_anchored_to_repository_root(self):
+        expected_path = Path(config.__file__).resolve().parents[2] / ".env"
+
+        self.assertEqual(config.DOTENV_PATH, expected_path)
+
+    def test_live_validation_requires_chat_and_embedding_settings(self):
+        settings = {
+            "VAST_IP_PORT_MODEL": "chat.test:8000",
+            "OPEN_BUTTON_TOKEN_MODEL": "chat-token",
+            "VAST_IP_PORT_EMBEDDING": None,
+            "OPEN_BUTTON_TOKEN_EMBEDDING": " ",
+        }
+
+        with (
+            patch.multiple(config, **settings),
+            self.assertRaises(config.RuntimeConfigurationError) as raised,
+        ):
+            config.validate_runtime_config(require_embedding=True)
+
+        self.assertEqual(
+            raised.exception.missing_variables,
+            ("VAST_IP_PORT_EMBEDDING", "OPEN_BUTTON_TOKEN_EMBEDDING"),
+        )
+        self.assertNotIn("chat-token", str(raised.exception))
+
+    def test_replay_validation_requires_only_chat_settings(self):
+        settings = {
+            "VAST_IP_PORT_MODEL": "chat.test:8000",
+            "OPEN_BUTTON_TOKEN_MODEL": "chat-token",
+            "VAST_IP_PORT_EMBEDDING": None,
+            "OPEN_BUTTON_TOKEN_EMBEDDING": None,
+        }
+
+        with patch.multiple(config, **settings):
+            config.validate_runtime_config(require_embedding=False)
+
+    def test_missing_chat_settings_fail_in_all_modes(self):
+        settings = {
+            "VAST_IP_PORT_MODEL": None,
+            "OPEN_BUTTON_TOKEN_MODEL": "",
+            "VAST_IP_PORT_EMBEDDING": "embedding.test:8001",
+            "OPEN_BUTTON_TOKEN_EMBEDDING": "embedding-token",
+        }
+
+        with (
+            patch.multiple(config, **settings),
+            self.assertRaises(config.RuntimeConfigurationError) as raised,
+        ):
+            config.validate_runtime_config(require_embedding=False)
+
+        self.assertEqual(
+            raised.exception.missing_variables,
+            ("VAST_IP_PORT_MODEL", "OPEN_BUTTON_TOKEN_MODEL"),
+        )
 
 
 class FakePipeline:
