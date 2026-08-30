@@ -10,6 +10,7 @@ from functools import partial
 from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
+from openai import DefaultHttpxClient
 
 from Definitions.const import CVE_TEST
 from Definitions.config import RuntimeConfig, validate_runtime_config
@@ -24,6 +25,7 @@ from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_sc
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 from Graph.errors import PipelineStageError
+from Graph.request_pacing import MinimumIntervalPacer
 
 
 def _serialize_pipeline_error(error, cve_id):
@@ -177,10 +179,24 @@ def build_pipeline(runtime_config: RuntimeConfig):
     print(f"Chat Host: {runtime_config.chat.base_url}")
     print(f"Embedding Host: {runtime_config.embedding.base_url}")
 
+    embedding_http_client = DefaultHttpxClient(
+        event_hooks={
+            "request": [
+                MinimumIntervalPacer(
+                    runtime_config.embedding.request_delay_seconds
+                )
+            ]
+        }
+    )
+
     embedding_model_instance = OpenAIEmbeddings(
         model=runtime_config.embedding.model,
         api_key=runtime_config.embedding.api_key,
         base_url=runtime_config.embedding.base_url,
+        http_client=embedding_http_client,
+        check_embedding_ctx_length=(
+            runtime_config.embedding.check_embedding_ctx_length
+        ),
     )
 
     semantic_chunker = SemanticChunkerNode(
@@ -199,12 +215,21 @@ def build_pipeline(runtime_config: RuntimeConfig):
         threshold=runtime_config.cosine_filter.threshold,
     )
 
+    chat_http_client = DefaultHttpxClient(
+        event_hooks={
+            "request": [
+                MinimumIntervalPacer(runtime_config.chat.request_delay_seconds)
+            ]
+        }
+    )
+
     summarizer_llm = init_chat_model(
         model=runtime_config.chat.summarizer_model,
         model_provider="openai",
         api_key=runtime_config.chat.api_key,
         base_url=runtime_config.chat.base_url,
         temperature=runtime_config.chat.summarizer_temperature,
+        http_client=chat_http_client,
     )
 
     summarizer = CVEAwareSummarizerNode(
@@ -218,6 +243,7 @@ def build_pipeline(runtime_config: RuntimeConfig):
         api_key=runtime_config.chat.api_key,
         base_url=runtime_config.chat.base_url,
         temperature=runtime_config.chat.classifier_temperature,
+        http_client=chat_http_client,
     )
 
     classifier = CVEClassifierNode(

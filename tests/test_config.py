@@ -14,11 +14,14 @@ classifier_model = "classifier-model"
 classifier_temperature = 0.0
 summarizer_model = "summarizer-model"
 summarizer_temperature = 0.0
+request_delay_seconds = 4.2
 
 [embedding]
 base_url = "https://embedding.example.test/v1"
 api_key = "embedding-secret-value"
 model = "embedding-model"
+check_embedding_ctx_length = false
+request_delay_seconds = 0.7
 
 [nvd]
 base_url = "https://nvd.example.test/cves/2.0"
@@ -59,7 +62,10 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.chat.api_key, "chat-secret-value")
         self.assertEqual(settings.embedding.api_key, "embedding-secret-value")
         self.assertEqual(settings.chat.classifier_model, "classifier-model")
+        self.assertEqual(settings.chat.request_delay_seconds, 4.2)
         self.assertEqual(settings.embedding.model, "embedding-model")
+        self.assertEqual(settings.embedding.request_delay_seconds, 0.7)
+        self.assertFalse(settings.embedding.check_embedding_ctx_length)
         self.assertEqual(settings.nvd.timeout_seconds, 12.5)
         self.assertEqual(settings.references.max_pages, 7)
         self.assertEqual(settings.evaluation.run_number, 3)
@@ -98,6 +104,32 @@ class RuntimeConfigurationTests(unittest.TestCase):
             ):
                 config.load_runtime_config(path)
 
+    def test_negative_request_delay_is_rejected(self):
+        invalid_config = VALID_CONFIG.replace(
+            "request_delay_seconds = 0.7",
+            "request_delay_seconds = -0.1",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self._write_config(temp_dir, invalid_config)
+            with self.assertRaisesRegex(
+                config.RuntimeConfigurationError,
+                r"\[embedding\]\.request_delay_seconds",
+            ):
+                config.load_runtime_config(path)
+
+    def test_embedding_length_check_must_be_boolean(self):
+        invalid_config = VALID_CONFIG.replace(
+            "check_embedding_ctx_length = false",
+            'check_embedding_ctx_length = "false"',
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self._write_config(temp_dir, invalid_config)
+            with self.assertRaisesRegex(
+                config.RuntimeConfigurationError,
+                r"\[embedding\]\.check_embedding_ctx_length must be a boolean",
+            ):
+                config.load_runtime_config(path)
+
     def test_invalid_endpoint_url_is_rejected(self):
         invalid_config = VALID_CONFIG.replace(
             'base_url = "https://chat.example.test/v1/openai/"',
@@ -132,6 +164,9 @@ class RuntimeConfigurationTests(unittest.TestCase):
             example["embedding"]["api_key"],
             "replace-with-embedding-api-key",
         )
+        self.assertEqual(example["chat"]["request_delay_seconds"], 0.0)
+        self.assertEqual(example["embedding"]["request_delay_seconds"], 0.0)
+        self.assertFalse(example["embedding"]["check_embedding_ctx_length"])
 
     def test_default_config_path_is_anchored_to_repository_root(self):
         expected_root = Path(config.__file__).resolve().parents[2]

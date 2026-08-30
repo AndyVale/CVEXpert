@@ -11,6 +11,7 @@ dependencies = [
     "langchain-openai>=1.4,<2",
     "langchain-text-splitters>=1.1,<2",
     "numpy>=2,<3",
+    "openai>=3,<4",
     "requests>=2.32,<3",
     "scikit-learn>=1.8,<2",
     "tqdm>=4.67,<5",

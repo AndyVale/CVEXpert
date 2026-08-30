@@ -32,11 +32,14 @@ def make_runtime_config(log_directory: str) -> RuntimeConfig:
             classifier_temperature=0.0,
             summarizer_model="summarizer-model",
             summarizer_temperature=0.0,
+            request_delay_seconds=4.2,
         ),
         embedding=EmbeddingSettings(
             base_url="https://embedding.example.test/v1",
             api_key="embedding-token",
             model="embedding-model",
+            request_delay_seconds=0.7,
+            check_embedding_ctx_length=False,
         ),
         nvd=NvdSettings(
             base_url="https://nvd.example.test/cves/2.0",
@@ -180,8 +183,15 @@ class RunnerTests(unittest.TestCase):
         runtime_config = make_runtime_config("logs/test-run")
         embeddings_client = FakeEmbeddingsClient()
         chat_client = FakeChatClient()
+        embedding_http_client = object()
+        chat_http_client = object()
 
         with (
+            patch.object(
+                CVE_expert_seq,
+                "DefaultHttpxClient",
+                side_effect=[embedding_http_client, chat_http_client],
+            ) as http_client_factory,
             patch.object(
                 CVE_expert_seq,
                 "OpenAIEmbeddings",
@@ -199,6 +209,8 @@ class RunnerTests(unittest.TestCase):
             model="embedding-model",
             api_key="embedding-token",
             base_url="https://embedding.example.test/v1",
+            http_client=embedding_http_client,
+            check_embedding_ctx_length=False,
         )
         self.assertEqual(
             [call.kwargs for call in chat_factory.call_args_list],
@@ -209,6 +221,7 @@ class RunnerTests(unittest.TestCase):
                     "api_key": "chat-token",
                     "base_url": "https://chat.example.test/v1",
                     "temperature": 0.0,
+                    "http_client": chat_http_client,
                 },
                 {
                     "model": "classifier-model",
@@ -216,9 +229,19 @@ class RunnerTests(unittest.TestCase):
                     "api_key": "chat-token",
                     "base_url": "https://chat.example.test/v1",
                     "temperature": 0.0,
+                    "http_client": chat_http_client,
                 },
             ],
         )
+        self.assertEqual(http_client_factory.call_count, 2)
+        embedding_pacer = http_client_factory.call_args_list[0].kwargs[
+            "event_hooks"
+        ]["request"][0]
+        chat_pacer = http_client_factory.call_args_list[1].kwargs[
+            "event_hooks"
+        ]["request"][0]
+        self.assertEqual(embedding_pacer.minimum_interval_seconds, 0.7)
+        self.assertEqual(chat_pacer.minimum_interval_seconds, 4.2)
         self.assertEqual(
             pipeline.steps[0].func.keywords,
             {

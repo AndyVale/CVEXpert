@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import math
 from pathlib import Path
 import tomllib
 from urllib.parse import urlparse
@@ -23,6 +24,7 @@ class ChatSettings:
     classifier_temperature: float
     summarizer_model: str
     summarizer_temperature: float
+    request_delay_seconds: float
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,8 @@ class EmbeddingSettings:
     base_url: str
     api_key: str = field(repr=False)
     model: str
+    request_delay_seconds: float
+    check_embedding_ctx_length: bool
 
 
 @dataclass(frozen=True)
@@ -144,6 +148,13 @@ def _require_integer(table: Mapping[str, object], table_name: str, key: str) -> 
     return value
 
 
+def _require_boolean(table: Mapping[str, object], table_name: str, key: str) -> bool:
+    value = table.get(key)
+    if not isinstance(value, bool):
+        raise _configuration_error(f"[{table_name}].{key} must be a boolean")
+    return value
+
+
 def _validate_url(value: str, setting_name: str) -> str:
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -179,12 +190,19 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
             "classifier_temperature",
             "summarizer_model",
             "summarizer_temperature",
+            "request_delay_seconds",
         },
     )
     embedding_data = _require_table(
         data,
         "embedding",
-        {"base_url", "api_key", "model"},
+        {
+            "base_url",
+            "api_key",
+            "model",
+            "request_delay_seconds",
+            "check_embedding_ctx_length",
+        },
     )
     nvd_data = _require_table(data, "nvd", {"base_url", "timeout_seconds"})
     reference_data = _require_table(data, "references", {"max_pages"})
@@ -212,6 +230,25 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
     )
     if classifier_temperature < 0 or summarizer_temperature < 0:
         raise _configuration_error("chat temperatures must be greater than or equal to zero")
+
+    chat_request_delay = _require_number(
+        chat_data,
+        "chat",
+        "request_delay_seconds",
+    )
+    embedding_request_delay = _require_number(
+        embedding_data,
+        "embedding",
+        "request_delay_seconds",
+    )
+    if not math.isfinite(chat_request_delay) or chat_request_delay < 0:
+        raise _configuration_error(
+            "[chat].request_delay_seconds must be a finite number greater than or equal to zero"
+        )
+    if not math.isfinite(embedding_request_delay) or embedding_request_delay < 0:
+        raise _configuration_error(
+            "[embedding].request_delay_seconds must be a finite number greater than or equal to zero"
+        )
 
     nvd_timeout = _require_number(nvd_data, "nvd", "timeout_seconds")
     if nvd_timeout <= 0:
@@ -275,6 +312,7 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
                 "summarizer_model",
             ),
             summarizer_temperature=summarizer_temperature,
+            request_delay_seconds=chat_request_delay,
         ),
         embedding=EmbeddingSettings(
             base_url=_validate_url(
@@ -283,6 +321,12 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
             ),
             api_key=_require_string(embedding_data, "embedding", "api_key"),
             model=_require_string(embedding_data, "embedding", "model"),
+            request_delay_seconds=embedding_request_delay,
+            check_embedding_ctx_length=_require_boolean(
+                embedding_data,
+                "embedding",
+                "check_embedding_ctx_length",
+            ),
         ),
         nvd=NvdSettings(
             base_url=_validate_url(
