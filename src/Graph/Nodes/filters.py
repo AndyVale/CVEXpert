@@ -1,7 +1,11 @@
 from tqdm import tqdm
 import numpy as np
 from Graph.errors import PipelineStageError
+from Graph.reporting import get_logger
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("filter")
 
 
 def _normalize_query_embedding(embedding) -> np.ndarray:
@@ -93,6 +97,14 @@ class CosineFilterNode:
              return {**state, "nvd_filtered_chunks": {}}
 
         cve_id = state.get("cve_id", "Unknown")
+        input_chunk_count = sum(len(chunks) for chunks in references_chunks.values())
+        LOGGER.debug(
+            "Cosine filtering started for %s: references=%s chunks=%s threshold=%s",
+            cve_id,
+            len(references_chunks),
+            input_chunk_count,
+            self.threshold,
+        )
         try:
             for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
                 if not chunks:
@@ -129,6 +141,19 @@ class CosineFilterNode:
                 error=error,
                 safe_message="Embedding or cosine filtering failed",
             ) from error
+
+        retained_chunk_count = sum(
+            1
+            for chunks in filtered_results.values()
+            for chunk in chunks
+            if chunk != "..."
+        )
+        LOGGER.debug(
+            "Cosine filtering completed for %s: retained=%s/%s chunks",
+            cve_id,
+            retained_chunk_count,
+            input_chunk_count,
+        )
 
         return {**state, 
                 "nvd_filtered_chunks": filtered_results}

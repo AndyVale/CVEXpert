@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+import io
 import json
 import tempfile
 import unittest
@@ -383,6 +385,7 @@ class RunnerTests(unittest.TestCase):
         pipeline = FakePipeline({})
         runtime_config = make_runtime_config("logs/test-run")
         with (
+            patch.object(CVE_expert_seq, "configure_console"),
             patch.object(
                 CVE_expert_seq,
                 "validate_runtime_config",
@@ -410,6 +413,58 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(result, "Finished: Run 0")
         self.assertFalse(hasattr(CVE_expert_seq, "concurrent"))
+
+    def test_main_renders_configuration_only_in_verbose_mode(self):
+        pipeline = FakePipeline({})
+        runtime_config = make_runtime_config("logs/test-run")
+        with (
+            patch.object(CVE_expert_seq, "configure_console"),
+            patch.object(
+                CVE_expert_seq,
+                "validate_runtime_config",
+                return_value=runtime_config,
+            ),
+            patch.object(
+                CVE_expert_seq,
+                "build_pipeline",
+                return_value=(pipeline, ["FakePipeline"]),
+            ),
+            patch.object(
+                CVE_expert_seq,
+                "run_evaluation",
+                return_value="Finished: Run 0",
+            ),
+            patch.object(
+                CVE_expert_seq,
+                "render_runtime_config",
+                return_value="CONFIG TABLE",
+            ) as render_config,
+        ):
+            CVE_expert_seq.main(verbose=False)
+            render_config.assert_not_called()
+
+            CVE_expert_seq.main(verbose=True)
+            render_config.assert_called_once()
+
+    def test_cli_passes_verbose_flag_to_main(self):
+        with patch.object(CVE_expert_seq, "main") as main:
+            exit_code = CVE_expert_seq.cli(["--verbose"])
+
+        self.assertEqual(exit_code, 0)
+        main.assert_called_once_with(verbose=True)
+
+    def test_cli_reports_top_level_error_without_traceback(self):
+        stream = io.StringIO()
+        with patch.object(
+            CVE_expert_seq,
+            "main",
+            side_effect=RuntimeError("short technical detail"),
+        ), redirect_stderr(stream):
+            exit_code = CVE_expert_seq.cli([])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("RuntimeError: short technical detail", stream.getvalue())
+        self.assertNotIn("Traceback", stream.getvalue())
 
 
 if __name__ == "__main__":

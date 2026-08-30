@@ -1,7 +1,12 @@
 import trafilatura
 from tqdm import tqdm
 from Graph.errors import make_pipeline_warning
+from Graph.reporting import get_logger, report_warning
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("scrape")
+
 
 def extract_md_trafilatura(
     state: CVEClassifierState,
@@ -11,10 +16,9 @@ def extract_md_trafilatura(
     """
     Fetches and extracts Markdown content from NVD reference URLs using Trafilatura.
 
-    This function randomly shuffles the available reference URLs to ensure a diverse 
-    sample and avoid processing bias. It attempts to download and extract content
-    in Markdown format (prioritizing recall) until the configured page limit
-    of successfully extracted pages is reached.
+    This function processes ranked reference URLs in order. It attempts to download
+    and extract content in Markdown format (prioritizing recall) until the configured
+    page limit of successfully extracted pages is reached.
 
     Args:
         state (CVEClassifierState): The current pipeline state containing the list 
@@ -29,7 +33,15 @@ def extract_md_trafilatura(
 
     pages_dict = {}
     warnings = list(state.get("pipeline_warnings", []))
+    initial_warning_count = len(warnings)
+    attempted = 0
+    LOGGER.debug(
+        "Reference extraction started: candidates=%s successful-page-limit=%s",
+        len(url_refs),
+        max_pages,
+    )
     for url_ref in tqdm(url_refs, "Extracting references"):
+        attempted += 1
         try:
             downloaded = trafilatura.fetch_url(url_ref)
             if not downloaded:
@@ -44,14 +56,21 @@ def extract_md_trafilatura(
                 break
 
         except Exception as error:
-            warnings.append(
-                make_pipeline_warning(
-                    stage="scrape",
-                    source=url_ref,
-                    error=error,
-                    safe_message="Reference download or text extraction failed",
-                )
+            warning = make_pipeline_warning(
+                stage="scrape",
+                source=url_ref,
+                error=error,
+                safe_message="Reference download or text extraction failed",
             )
+            warnings.append(warning)
+            report_warning(LOGGER, warning, error)
+
+    LOGGER.debug(
+        "Reference extraction completed: attempted=%s extracted=%s warnings=%s",
+        attempted,
+        len(pages_dict),
+        len(warnings) - initial_warning_count,
+    )
 
     return {**state,
             "nvd_references_pages": pages_dict,

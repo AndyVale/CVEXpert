@@ -1,9 +1,14 @@
 from Graph.errors import PipelineStageError
+from Graph.reporting import get_logger
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("format")
 
 
 def formatter(state: CVEClassifierState) -> CVEClassifierState:
     cve_id = state.get("cve_id", "Unknown")
+    LOGGER.debug("Classification-context formatting started for %s", cve_id)
     try:
         nvd_desc = state["nvd_description"]
         summaries = state["summaries"]
@@ -34,4 +39,10 @@ def formatter(state: CVEClassifierState) -> CVEClassifierState:
 --- SECONDARY SOURCES: TECHNICAL SUMMARIES ---
 {references_text}
 """
+    LOGGER.debug(
+        "Classification-context formatting completed for %s: summaries=%s context_chars=%s",
+        cve_id,
+        len(summaries),
+        len(rag_text),
+    )
     return {**state, "rag": rag_text}

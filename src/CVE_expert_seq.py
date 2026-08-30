@@ -2,9 +2,11 @@
 Linear workflow to classify CVEs against list of labels.
 """
 
+import argparse
 import os
 import json
 import time
+from collections.abc import Sequence
 from functools import partial
 
 from langchain.chat_models import init_chat_model
@@ -13,7 +15,7 @@ from langchain_openai import OpenAIEmbeddings
 from openai import DefaultHttpxClient
 
 from Definitions.const import CVE_TEST
-from Definitions.config import RuntimeConfig, validate_runtime_config
+from Definitions.config import CONFIG_PATH, RuntimeConfig, validate_runtime_config
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
@@ -26,6 +28,15 @@ from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 from Graph.errors import PipelineStageError
 from Graph.request_pacing import MinimumIntervalPacer
+from Graph.reporting import (
+    configure_console,
+    get_logger,
+    render_runtime_config,
+    report_error,
+)
+
+
+LOGGER = get_logger("runner")
 
 
 def _serialize_pipeline_error(error, cve_id):
@@ -61,7 +72,7 @@ def run_evaluation(
 
     output_file = run_folder / f"RUN_{run_number}.json"
 
-    print(f"[Run {run_number}] Starting. Log: {output_file.name}")
+    LOGGER.info("[Run %s] Starting. Log: %s", run_number, output_file)
 
     log = {
         "pipeline_metadata": {
@@ -78,7 +89,7 @@ def run_evaluation(
     all_y_true = []
     all_y_pred = []
     for cve, expected_labels in CVE_TEST.items():
-        print(f"[Run {run_number}] --- Analyzing {cve} ---")
+        LOGGER.info("[Run %s] Analyzing %s", run_number, cve)
         
         try:
             t = time.time()
@@ -108,10 +119,27 @@ def run_evaluation(
             
             all_y_true.append(expected_labels)
             all_y_pred.append(predicted_labels)
+            LOGGER.info(
+                "[Run %s] %s finished: status=%s labels=%s duration=%.2fs",
+                run_number,
+                cve,
+                status,
+                predicted_labels,
+                t,
+            )
 
         except Exception as error:
             error_details, error_msg = _serialize_pipeline_error(error, cve)
-            print(f"[Run {run_number}] ERROR on {cve}: {error_msg}")
+            technical_error = (
+                error.original_error
+                if isinstance(error, PipelineStageError)
+                else error
+            )
+            report_error(
+                LOGGER,
+                f"[Run {run_number}] {error_msg}",
+                technical_error,
+            )
             
             log["cves"][cve] = {
                 "status": "error",
@@ -125,7 +153,7 @@ def run_evaluation(
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(log, f, indent=2)
 
-        print(f"[Run {run_number}] Log updated for {cve}")
+        LOGGER.debug("[Run %s] Log updated for %s", run_number, cve)
 
     aggregation_complete = True
     if all_y_true and all_y_pred:
@@ -135,12 +163,16 @@ def run_evaluation(
                 all_y_pred,
                 ALL_LABELS,
             )
-        except Exception as e:
-            print(f"[Run {run_number}] Error computing aggregated scores: {e}")
+        except Exception as error:
+            report_error(
+                LOGGER,
+                f"[Run {run_number}] Aggregate metric computation failed",
+                error,
+            )
             aggregation_complete = False
             log["aggregated_scores"] = {
                 "error": "Aggregate metric computation failed",
-                "error_type": type(e).__name__,
+                "error_type": type(error).__name__,
             }
     else:
         log["aggregated_scores"] = {"note": "No successful predictions to aggregate."}
@@ -169,15 +201,21 @@ def run_evaluation(
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2)
 
-    print(f"\n[Run {run_number}] COMPLETED. File: {output_file.resolve()}")
+    LOGGER.info(
+        "[Run %s] Completed: successful=%s degraded=%s failed=%s file=%s",
+        run_number,
+        successful,
+        degraded,
+        failed,
+        output_file.resolve(),
+    )
     return f"Finished: Run {run_number}"
 
 
 def build_pipeline(runtime_config: RuntimeConfig):
     """Construct the configured live linear pipeline after validation."""
 
-    print(f"Chat Host: {runtime_config.chat.base_url}")
-    print(f"Embedding Host: {runtime_config.embedding.base_url}")
+    LOGGER.debug("Constructing embedding client and linear pipeline")
 
     embedding_http_client = DefaultHttpxClient(
         event_hooks={
@@ -282,17 +320,60 @@ def build_pipeline(runtime_config: RuntimeConfig):
             else:
                 pipeline_component_names.append(target.__class__.__name__)
 
-    print(f"Pipeline Components: {pipeline_component_names}")
+    LOGGER.debug("Pipeline components: %s", " -> ".join(pipeline_component_names))
     return pipeline, pipeline_component_names
 
 
-def main():
+def main(*, verbose: bool = False):
     """Build the live pipeline and run the benchmark exactly once."""
 
+    configure_console(verbose=verbose)
     runtime_config = validate_runtime_config()
+    configure_console(
+        verbose=verbose,
+        sensitive_values=(
+            runtime_config.chat.api_key,
+            runtime_config.embedding.api_key,
+        ),
+    )
+    if verbose:
+        LOGGER.debug(
+            "\n%s",
+            render_runtime_config(
+                runtime_config,
+                config_path=CONFIG_PATH,
+                cve_count=len(CVE_TEST),
+            ),
+        )
     pipeline, pipeline_component_names = build_pipeline(runtime_config)
     return run_evaluation(pipeline, pipeline_component_names, runtime_config)
 
 
+def cli(argv: Sequence[str] | None = None) -> int:
+    """Run the command-line entry point with concise top-level failures."""
+
+    parser = argparse.ArgumentParser(
+        description="Run the linear CVExpert benchmark pipeline.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="show the effective configuration and detailed stage summaries",
+    )
+    args = parser.parse_args(argv)
+    configure_console(verbose=args.verbose)
+
+    try:
+        main(verbose=args.verbose)
+    except KeyboardInterrupt:
+        LOGGER.error("ERROR Pipeline interrupted by the user")
+        return 130
+    except Exception as error:
+        report_error(LOGGER, "Pipeline setup or execution failed", error)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(cli())

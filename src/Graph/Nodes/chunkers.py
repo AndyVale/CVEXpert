@@ -2,7 +2,26 @@ from tqdm import tqdm
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from Graph.errors import make_pipeline_warning
+from Graph.reporting import get_logger, report_warning
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("chunk")
+
+
+def _report_chunking_summary(
+    strategy: str,
+    pages: dict,
+    chunks: dict,
+    warning_count: int,
+) -> None:
+    LOGGER.debug(
+        "%s chunking completed: pages=%s chunks=%s warnings=%s",
+        strategy,
+        len(pages),
+        sum(len(page_chunks) for page_chunks in chunks.values()),
+        warning_count,
+    )
 
 class RecursiveCharacterChunkerNode:
     """
@@ -51,8 +70,11 @@ class RecursiveCharacterChunkerNode:
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
         warnings = list(state.get("pipeline_warnings", []))
+        initial_warning_count = len(warnings)
+        LOGGER.debug("Recursive character chunking started: pages=%s", len(pages))
 
         if not pages:
+            _report_chunking_summary("Recursive character", pages, chunks_dict, 0)
             return {**state, "nvd_references_chunks": {}}
 
         for url, text in tqdm(pages.items(), "Recursive splitting pages"):
@@ -67,14 +89,21 @@ class RecursiveCharacterChunkerNode:
                 chunks_dict[url] = chunks
             except Exception as error:
                 chunks_dict[url] = []
-                warnings.append(
-                    make_pipeline_warning(
-                        stage="chunk",
-                        source=url,
-                        error=error,
-                        safe_message="Recursive character chunking failed",
-                    )
+                warning = make_pipeline_warning(
+                    stage="chunk",
+                    source=url,
+                    error=error,
+                    safe_message="Recursive character chunking failed",
                 )
+                warnings.append(warning)
+                report_warning(LOGGER, warning, error)
+
+        _report_chunking_summary(
+            "Recursive character",
+            pages,
+            chunks_dict,
+            len(warnings) - initial_warning_count,
+        )
 
         return {**state,
                 "nvd_references_chunks": chunks_dict,
@@ -116,8 +145,11 @@ class MarkdownChunkerNode:
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
         warnings = list(state.get("pipeline_warnings", []))
+        initial_warning_count = len(warnings)
+        LOGGER.debug("Markdown chunking started: pages=%s", len(pages))
 
         if not pages:
+            _report_chunking_summary("Markdown", pages, chunks_dict, 0)
             return {**state, "nvd_references_chunks": {}}
 
         for url, text in tqdm(pages.items(), "Markdown splitting pages"):
@@ -132,14 +164,21 @@ class MarkdownChunkerNode:
                 chunks_dict[url] = chunks
             except Exception as error:
                 chunks_dict[url] = []
-                warnings.append(
-                    make_pipeline_warning(
-                        stage="chunk",
-                        source=url,
-                        error=error,
-                        safe_message="Markdown chunking failed",
-                    )
+                warning = make_pipeline_warning(
+                    stage="chunk",
+                    source=url,
+                    error=error,
+                    safe_message="Markdown chunking failed",
                 )
+                warnings.append(warning)
+                report_warning(LOGGER, warning, error)
+
+        _report_chunking_summary(
+            "Markdown",
+            pages,
+            chunks_dict,
+            len(warnings) - initial_warning_count,
+        )
 
         return {**state,
                 "nvd_references_chunks": chunks_dict,
@@ -198,8 +237,16 @@ class SemanticChunkerNode:
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
         warnings = list(state.get("pipeline_warnings", []))
+        initial_warning_count = len(warnings)
+        LOGGER.debug(
+            "Semantic chunking started: pages=%s threshold=%s/%s",
+            len(pages),
+            self.breakpoint_threshold_type,
+            self.breakpoint_threshold_amount,
+        )
 
         if not pages:
+            _report_chunking_summary("Semantic", pages, chunks_dict, 0)
             return {**state, "nvd_references_chunks": {}}
 
         for url, text in tqdm(pages.items(), "Semantic chunking pages"):
@@ -214,14 +261,21 @@ class SemanticChunkerNode:
                 chunks_dict[url] = chunks
             except Exception as error:
                 chunks_dict[url] = []
-                warnings.append(
-                    make_pipeline_warning(
-                        stage="chunk",
-                        source=url,
-                        error=error,
-                        safe_message="Semantic chunking failed",
-                    )
+                warning = make_pipeline_warning(
+                    stage="chunk",
+                    source=url,
+                    error=error,
+                    safe_message="Semantic chunking failed",
                 )
+                warnings.append(warning)
+                report_warning(LOGGER, warning, error)
+
+        _report_chunking_summary(
+            "Semantic",
+            pages,
+            chunks_dict,
+            len(warnings) - initial_warning_count,
+        )
 
         return {**state,
                 "nvd_references_chunks": chunks_dict,

@@ -40,6 +40,7 @@ class PipelineStageError(RuntimeError):
         self.cve_id = cve_id
         self.error_type = type(error).__name__
         self.safe_message = safe_message
+        self.original_error = error
         super().__init__(
             f"{stage} stage failed for {cve_id}: "
             f"{safe_message} ({self.error_type})"

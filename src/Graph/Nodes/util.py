@@ -1,6 +1,11 @@
 import json
 import os
+from Graph.reporting import get_logger
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("state-loader")
+
 
 class StateFromFileLoader:
     """
@@ -34,7 +39,7 @@ class StateFromFileLoader:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f" The log file at {file_path} was not found.")
 
-        print(f"Loading static state from: {file_path}")
+        LOGGER.debug("Loading static state from %s", file_path)
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -62,14 +67,17 @@ class StateFromFileLoader:
         cves_data = self.log_data.get("cves", {})
         
         if cve_id not in cves_data:
-            print(f"Warning: CVE {cve_id} not found in the log file.")
+            LOGGER.warning("WARNING CVE %s not found in the state log", cve_id)
             return state
 
         cve_entry = cves_data[cve_id]
         
         # Check if the previous run for this CVE was successful
         if cve_entry.get("status") == "error":
-            print(f"Warning: Log entry for {cve_id} indicates a previous error.")
+            LOGGER.warning(
+                "WARNING State log entry for %s contains a previous error",
+                cve_id,
+            )
             return state
 
         updates = {}
@@ -77,6 +85,6 @@ class StateFromFileLoader:
             if field in cve_entry:
                 updates[field] = cve_entry[field]
         
-        print(f"Loaded static context for {cve_id}")
+        LOGGER.debug("Loaded static context for %s", cve_id)
         
         return {**state, **updates}

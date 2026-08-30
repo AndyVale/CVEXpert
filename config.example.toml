@@ -37,5 +37,5 @@ query = "What type of vulnerability is it?"
 threshold = 0.6
 
 [evaluation]
-log_directory = "logs/LOG_GPT_NORANDAware"
+log_directory = "logs"
 run_number = 0

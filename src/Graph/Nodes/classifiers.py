@@ -1,7 +1,11 @@
 from typing import NoReturn
 
 from Graph.errors import PipelineStageError
+from Graph.reporting import get_logger
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("classify")
 
 
 def _validate_labels(labels, allowed_labels: list[str]) -> list[str]:
@@ -89,11 +93,13 @@ ALLOWED LABELS:
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         cve_id = state.get("cve_id", "Unknown")
+        LOGGER.debug("Classification started for %s without RAG context", cve_id)
         try:
             prompt = self._get_prompt(cve_id)
             result = self.struct_model.invoke(prompt)
 
             labels = _labels_from_result(result, self.all_labels)
+            LOGGER.debug("Classification completed for %s: labels=%s", cve_id, labels)
             return {**state,
                     "cve_labels": labels}
 
@@ -197,7 +203,7 @@ ALLOWED LABELS:
         cve_id = state.get("cve_id", "Unknown")
         rag_content = state.get("rag", "")
 
-        print(f"Classifying {cve_id}...")
+        LOGGER.debug("Classification started for %s", cve_id)
 
         try:
             if not isinstance(rag_content, str) or not rag_content.strip():
@@ -206,6 +212,7 @@ ALLOWED LABELS:
             result = self.struct_model.invoke(prompt)
 
             labels = _labels_from_result(result, self.all_labels)
+            LOGGER.debug("Classification completed for %s: labels=%s", cve_id, labels)
             return {**state,
                     "cve_labels": labels}
 
@@ -338,7 +345,7 @@ ALLOWED LABELS:
         try:
             if not isinstance(rag_content, str) or not rag_content.strip():
                 raise ValueError("Classifier requires non-empty RAG content")
-            print(f"Classifying {cve_id}...")
+            LOGGER.debug("Confidence classification started for %s", cve_id)
             prompt = self._get_prompt(cve_id, rag_content)
             result = self.struct_model.invoke(prompt)
 
@@ -361,6 +368,11 @@ ALLOWED LABELS:
                 parsed_confidences[lbl] = item.get("confidence", 0.0)
 
             _validate_labels(parsed_labels, self.all_labels)
+            LOGGER.debug(
+                "Confidence classification completed for %s: labels=%s",
+                cve_id,
+                parsed_labels,
+            )
 
             return {**state,
                     "cve_labels": parsed_labels,
@@ -464,7 +476,11 @@ ALLOWED LABELS:
         cve_id = state.get("cve_id", "Unknown")
         rag_content = state.get("rag", "")
 
-        print(f"Classifying {cve_id} (Self-Consistency: {self.total_runs} runs)...")
+        LOGGER.debug(
+            "Self-consistency classification started for %s: runs=%s",
+            cve_id,
+            self.total_runs,
+        )
 
         label_counts = {}
         label_motivations = {}
@@ -512,6 +528,11 @@ ALLOWED LABELS:
                 final_confidence[lbl] = count / self.total_runs
 
             final_labels = _validate_labels(list(label_counts.keys()), self.all_labels)
+            LOGGER.debug(
+                "Self-consistency classification completed for %s: labels=%s",
+                cve_id,
+                final_labels,
+            )
             return {**state,
                     "cve_labels": final_labels,
                     "labels_motivation": label_motivations,

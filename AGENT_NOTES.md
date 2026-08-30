@@ -12,7 +12,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
 - Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
-- Current phase: provider-neutral local TOML configuration, uv project metadata, embedding request-shape control, and model request pacing are implemented; return to the next measured P1 quality or acquisition unit.
+- Current phase: verbose tqdm-safe reporting is committed in `d435211`; the evaluation log-path simplification to `logs/RUN_<n>.json` is implemented locally and awaiting its separate review/commit.
 - Flat taxonomy, `CVE_TEST`, prompts, pipeline stage order, and artifact shape remain unchanged. Former hard-coded model/stage/evaluation values are now validated local TOML settings; the tracked template uses generic model placeholders while retaining the previous non-model pipeline parameters as examples.
 
 ## Durable user decisions
@@ -39,6 +39,8 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 18. The declared Python baseline is `>=3.12`. The project remains deliberately non-packaged until a separate source-layout/CLI refactor is justified.
 19. The obsolete `src/test.py` replay experiment has been removed. Preserve `StateFromFileLoader` as a tested utility, but add any future replay feature as an explicit, versioned resume-stage interface rather than another manually configured script.
 20. Chat and embedding endpoints use separate configurable minimum request intervals. The chat interval is shared across summarizer and classifier calls; the embedding interval is shared across semantic chunking and filtering. This addresses RPM quotas but deliberately does not attempt token-per-minute accounting yet.
+21. Console verbosity is controlled by `-v`/`--verbose`, not TOML. Normal mode retains lifecycle messages and terminal errors but hides recoverable warnings; verbose mode adds those warnings, a safe configuration table, and stage summaries. Warnings remain recorded in `pipeline_warnings` and JSON regardless of console mode. Reporting uses standard logging plus `tqdm.write()` without a new dependency.
+22. Provider endpoint changes are outside the verbose-reporting unit. The user intends to use a separately hosted OpenAI-compatible embedding endpoint while retaining the current chat provider, but will configure those ignored local values separately.
 
 ## Repository understanding
 
@@ -78,7 +80,7 @@ There is no acquisition, page, chunk, embedding, or summary cache. The default r
 - Filter: `CosineFilterNode`, query `What type of vulnerability is it?`, threshold `0.6`
 - Summarizer: `CVEAwareSummarizerNode`
 - Classifier: `CVEClassifierNode`
-- Template output location: `logs/LOG_GPT_NORANDAware/RUN_0.json`; both directory and run number are configurable.
+- Template output location: `logs/RUN_0.json`; both directory and run number are configurable. Historical ignored artifacts under `logs/LOG_GPT_NORANDAware/` are left untouched.
 
 These are configuration-shape examples, not provider-specific application defaults. Model identifiers must be replaced for the selected endpoints. The live program requires a user-created ignored `config.toml` and has no fallback constants for these values.
 
@@ -122,7 +124,7 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
 - Local observation on 2026-08-30: `uv 0.11.26`, Python `3.14.6`, the new 85-package lock resolves, the synchronized environment is consistent, and runtime imports succeed.
 - `config.toml` is resolved relative to the repository root and contains both endpoint API keys directly. `.env` is not read. API-key fields are hidden from dataclass representations, but the full configuration object must still be treated as sensitive.
-- The repository now has 42 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction and request pacing, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
+- The repository now has 54 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction and request pacing, tqdm-safe reporting, color/redaction behavior, CLI verbosity and failure handling, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
 
 ## Documentation inconsistencies
 
@@ -517,6 +519,21 @@ These are proposals, not authorization to edit production code:
 - The ignored local configuration uses modest headroom over the currently reported RPM limits. The tracked example remains provider-neutral, uses `0.0`, and documents the `60 / RPM` calculation. Token-per-minute enforcement remains deferred until measurements show it is necessary.
 - Declared the directly imported `openai` client in `pyproject.toml` and updated `uv.lock` without changing the resolved package set.
 - Added five regression tests, bringing the offline suite to 42 passing tests. Compilation, lock consistency, installed dependency consistency, and whitespace checks also passed. No NVD, reference, embedding, or chat request was made during verification.
+
+### 2026-08-30 — Verbose pipeline reporting (`d435211`)
+
+- Added a centralized project logger whose handler writes through `tqdm.write()`, colors interactive warnings yellow and errors red, honors `NO_COLOR`, redacts configured secrets, sanitizes displayed URLs, and reduces technical exceptions to concise single-line diagnostics.
+- Added `-v`/`--verbose`, a safe effective-configuration table emitted before live client construction, and aggregate operation summaries across the active NVD, scrape, chunk, filter, summarize, format, classify, and evaluation stages.
+- Normal mode retains lifecycle output and terminal errors while hiding recoverable warnings. Verbose mode emits those warnings immediately; they remain in `pipeline_warnings` and JSON in both modes. JSON failure fields and pipeline failure semantics are unchanged.
+- Added offline regression coverage for output-level filtering, tqdm-safe writes, ANSI colors, `NO_COLOR`, redaction, URL sanitization, concise upstream errors (including long provider tokens), safe configuration rendering, immediate warning reporting, CLI verbosity, and traceback-free top-level failures. The suite currently has 54 passing tests.
+- Live verification first exposed that the checked-out `CVE_TEST` currently contains all 20 fixtures; the exact CLI run was interrupted during the second CVE to avoid unintentionally completing the full benchmark. A second invocation restricted `CVE_TEST` to its first item in memory, leaving the source untouched, and completed the one-CVE reporting check.
+- The one-CVE run verified the safe table, stage summaries, tqdm-safe yellow warnings, a red terminal error, and a final `successful=0 degraded=0 failed=1` summary without a traceback. The unchanged local embedding configuration still produced recoverable semantic-chunker HTTP 400 batch-limit errors and HTTP 429 quota errors, followed by a terminal HTTP 429 filter failure. The ignored old-path `RUN_0.json` was rewritten as authorized.
+- No configuration values or log paths were changed in this reporting unit. Its complete diff, offline verification, and authorized one-CVE live output were shown before commit.
+
+### 2026-08-30 — Simplified evaluation log path (pending separate commit)
+
+- Changed the tracked template and ignored local configuration from `logs/LOG_GPT_NORANDAware` to `logs`, so run 0 resolves to `logs/RUN_0.json`.
+- Updated user and agent documentation to match. Existing ignored files under `logs/LOG_GPT_NORANDAware/` are intentionally untouched and remain recoverable.
 
 ## Notes maintenance checklist
 

@@ -26,6 +26,7 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `src/Graph/state.py`: shared `CVEClassifierState` `TypedDict`.
 - `src/Graph/errors.py`: terminal `PipelineStageError` and recoverable `PipelineWarning` records.
 - `src/Graph/request_pacing.py`: thread-safe minimum-interval pacing used by synchronous chat and embedding HTTP clients.
+- `src/Graph/reporting.py`: centralized tqdm-safe console logging, ANSI severity colors, concise diagnostics, redaction, and the verbose runtime-configuration table.
 - `src/Graph/Nodes/`: reusable pipeline stages. The `Graph` name and several LangGraph-oriented docstrings are historical; these objects are also used as ordinary LangChain callables.
 - `tests/`: standard-library `unittest` regression suite. Tests use fakes and must remain offline.
 - `imgs/system.png`: an older high-level architecture diagram that omits some current stages.
@@ -46,9 +47,11 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 
 `main()` loads and validates `config.toml`, builds the pipeline once, and processes `CVE_TEST` once in insertion order. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat and embedding HTTP attempts have separate configurable minimum intervals; summarization and classification share the chat pacer, while semantic chunking and filtering share the embedding pacer.
 
+The CLI accepts `-v`/`--verbose`. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall. Programmatic callers use `main(verbose=False)`.
+
 Terminal NVD, filtering, formatter-precondition, or classifier failures raise `PipelineStageError`; they must never be converted to `NONE`. A successful, validated model response may return `["NONE"]`. Individual reference scrape, chunk, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`.
 
-The template retains the existing `logs/LOG_GPT_NORANDAware/RUN_0.json` location, but `[evaluation].log_directory` and `run_number` are configurable. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Aggregate metrics score successful and degraded classifications, exclude terminal errors, and report `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields.
+The template writes `logs/RUN_0.json`, but `[evaluation].log_directory` and `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Aggregate metrics score successful and degraded classifications, exclude terminal errors, and report `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields.
 
 ### State fields
 
@@ -80,6 +83,7 @@ Run commands through that environment without requiring shell activation:
 
 ```bash
 uv run python src/CVE_expert_seq.py
+uv run python src/CVE_expert_seq.py --verbose
 ```
 
 Alternatively, activate it first:

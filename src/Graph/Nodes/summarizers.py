@@ -1,6 +1,10 @@
 from tqdm import tqdm
 from Graph.errors import make_pipeline_warning
+from Graph.reporting import get_logger, report_warning
 from Graph.state import CVEClassifierState
+
+
+LOGGER = get_logger("summarize")
 
 
 def _validate_summary_response(response) -> tuple[bool, str]:
@@ -16,6 +20,37 @@ def _validate_summary_response(response) -> tuple[bool, str]:
     if is_cve_related and not summary.strip():
         raise ValueError("Related reference summary must not be empty")
     return is_cve_related, summary.strip()
+
+
+def _record_summary_warning(
+    warnings: list,
+    *,
+    source: str,
+    error: BaseException,
+    safe_message: str,
+) -> None:
+    warning = make_pipeline_warning(
+        stage="summarize",
+        source=source,
+        error=error,
+        safe_message=safe_message,
+    )
+    warnings.append(warning)
+    report_warning(LOGGER, warning, error)
+
+
+def _report_summary_completion(
+    *,
+    reference_count: int,
+    summary_count: int,
+    warning_count: int,
+) -> None:
+    LOGGER.debug(
+        "Reference summarization completed: references=%s summaries=%s warnings=%s",
+        reference_count,
+        summary_count,
+        warning_count,
+    )
 
 
 class ReferenceSummarizerNode:
@@ -113,8 +148,18 @@ EXTRACTED TEXT TO ANALYZE:
         filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
         summaries_dict = {}
         warnings = list(state.get("pipeline_warnings", []))
+        initial_warning_count = len(warnings)
+        LOGGER.debug(
+            "Reference summarization started: references=%s",
+            len(filtered_chunks_dict),
+        )
 
         if not filtered_chunks_dict:
+            _report_summary_completion(
+                reference_count=0,
+                summary_count=0,
+                warning_count=0,
+            )
             return {**state, "summaries": {}}
 
         for url, chunks in tqdm(filtered_chunks_dict.items(), "Summarizing filtered chunks"):
@@ -123,8 +168,6 @@ EXTRACTED TEXT TO ANALYZE:
 
             text_to_analyze = "\n\n".join(chunks).strip()
 
-            # print(f"Summarizing reference: {url}...")
-            
             try:
                 response = self.struct_model.invoke(self._get_prompt(text_to_analyze))
                 is_cve_related, summary = _validate_summary_response(response)
@@ -132,18 +175,20 @@ EXTRACTED TEXT TO ANALYZE:
                 if is_cve_related:
                     summaries_dict[url] = summary
 
-                # print("Summarization completed")
-                
             except Exception as error:
-                warnings.append(
-                    make_pipeline_warning(
-                        stage="summarize",
-                        source=url,
-                        error=error,
-                        safe_message="Reference summarization failed",
-                    )
+                _record_summary_warning(
+                    warnings,
+                    source=url,
+                    error=error,
+                    safe_message="Reference summarization failed",
                 )
                 continue
+
+        _report_summary_completion(
+            reference_count=len(filtered_chunks_dict),
+            summary_count=len(summaries_dict),
+            warning_count=len(warnings) - initial_warning_count,
+        )
 
         return {**state,
                 "summaries": summaries_dict,
@@ -249,12 +294,23 @@ EXTRACTED TEXT TO ANALYZE:
         filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
         summaries_dict = {}
         warnings = list(state.get("pipeline_warnings", []))
+        initial_warning_count = len(warnings)
         
         # Extract context from state
         cve_id = state["cve_id"]
         nvd_description = state["nvd_description"]
+        LOGGER.debug(
+            "CVE-aware summarization started for %s: references=%s",
+            cve_id,
+            len(filtered_chunks_dict),
+        )
 
         if not filtered_chunks_dict:
+            _report_summary_completion(
+                reference_count=0,
+                summary_count=0,
+                warning_count=0,
+            )
             return {**state, "summaries": {}}
 
         for url, chunks in tqdm(filtered_chunks_dict.items(), "Summarizing filtered chunks"):
@@ -275,15 +331,19 @@ EXTRACTED TEXT TO ANALYZE:
                     summaries_dict[url] = summary
 
             except Exception as error:
-                warnings.append(
-                    make_pipeline_warning(
-                        stage="summarize",
-                        source=url,
-                        error=error,
-                        safe_message="CVE-aware reference summarization failed",
-                    )
+                _record_summary_warning(
+                    warnings,
+                    source=url,
+                    error=error,
+                    safe_message="CVE-aware reference summarization failed",
                 )
                 continue
+
+        _report_summary_completion(
+            reference_count=len(filtered_chunks_dict),
+            summary_count=len(summaries_dict),
+            warning_count=len(warnings) - initial_warning_count,
+        )
 
         return {**state,
                 "summaries": summaries_dict,
@@ -319,8 +379,18 @@ class NoSummarizerNode:
         filtered_chunks_dict = state.get("nvd_filtered_chunks", {})
         summaries_dict = {}
         warnings = list(state.get("pipeline_warnings", []))
+        initial_warning_count = len(warnings)
+        LOGGER.debug(
+            "Reference concatenation started: references=%s",
+            len(filtered_chunks_dict),
+        )
 
         if not filtered_chunks_dict:
+            _report_summary_completion(
+                reference_count=0,
+                summary_count=0,
+                warning_count=0,
+            )
             return {**state, "summaries": {}}
 
         for url, chunks in filtered_chunks_dict.items():
@@ -334,14 +404,18 @@ class NoSummarizerNode:
                 if concatenated_text:
                     summaries_dict[url] = concatenated_text
             except Exception as error:
-                warnings.append(
-                    make_pipeline_warning(
-                        stage="summarize",
-                        source=url,
-                        error=error,
-                        safe_message="Reference concatenation failed",
-                    )
+                _record_summary_warning(
+                    warnings,
+                    source=url,
+                    error=error,
+                    safe_message="Reference concatenation failed",
                 )
+
+        _report_summary_completion(
+            reference_count=len(filtered_chunks_dict),
+            summary_count=len(summaries_dict),
+            warning_count=len(warnings) - initial_warning_count,
+        )
 
         return {**state,
                 "summaries": summaries_dict,

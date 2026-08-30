@@ -44,9 +44,17 @@ The active entry point evaluates the 20 CVEs in `CVE_TEST` once, in insertion or
 uv run python src/CVE_expert_seq.py
 ```
 
+Normal output includes run and CVE lifecycle messages, progress bars, terminal errors, and the final coverage summary. For recoverable warnings, a complete safe configuration table, and stage-level operation summaries, enable verbose mode:
+
+```bash
+uv run python src/CVE_expert_seq.py --verbose
+```
+
+Console messages are written through `tqdm`, so verbose warnings and errors do not corrupt active progress bars. Warnings are yellow and errors are red in an interactive terminal. Set the standard `NO_COLOR` environment variable to disable ANSI colors. Technical diagnostics are shortened to one line, and configured API keys are redacted; the configuration table reports credentials only as `configured`. Recoverable warnings remain recorded in the JSON artifact even when normal mode does not print them.
+
 This is a live workflow: it contacts NVD, downloads external pages, and invokes the configured embedding and chat endpoints. Model requests have configurable minimum-interval pacing, but there is no persistent cache, acquisition retry policy, or token-per-minute limiter. Review the likely request volume and service cost before running it.
 
-By default, the template writes `logs/LOG_GPT_NORANDAware/RUN_0.json`. The log directory and run number are configurable in `[evaluation]`.
+By default, the template writes `logs/RUN_0.json`. The log directory and run number are configurable in `[evaluation]`.
 
 ## Pipeline
 

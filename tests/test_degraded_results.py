@@ -33,6 +33,7 @@ class ReferenceWarningTests(unittest.TestCase):
                 "Graph.Nodes.scrapers.trafilatura.extract",
                 return_value="Usable page text",
             ),
+            patch("Graph.Nodes.scrapers.report_warning") as report_warning,
         ):
             state = extract_md_trafilatura(
                 {"cve_id": "CVE-TEST-1", "nvd_url_references": urls},
@@ -46,6 +47,7 @@ class ReferenceWarningTests(unittest.TestCase):
         self.assertEqual(len(state["pipeline_warnings"]), 1)
         self.assertEqual(state["pipeline_warnings"][0]["stage"], "scrape")
         self.assertEqual(state["pipeline_warnings"][0]["source"], urls[0])
+        report_warning.assert_called_once()
 
     def test_failed_chunk_records_warning_and_keeps_successful_reference(self):
         node = RecursiveCharacterChunkerNode()
@@ -55,7 +57,10 @@ class ReferenceWarningTests(unittest.TestCase):
                 raise ValueError("cannot split")
             return ["usable chunk"]
 
-        with patch.object(node.splitter, "split_text", side_effect=split):
+        with (
+            patch.object(node.splitter, "split_text", side_effect=split),
+            patch("Graph.Nodes.chunkers.report_warning") as report_warning,
+        ):
             state = node(
                 {
                     "cve_id": "CVE-TEST-1",
@@ -72,6 +77,7 @@ class ReferenceWarningTests(unittest.TestCase):
         )
         self.assertEqual(state["nvd_references_chunks"]["https://failed.example.test"], [])
         self.assertEqual(state["pipeline_warnings"][0]["stage"], "chunk")
+        report_warning.assert_called_once()
 
     def test_failed_summary_records_warning_and_keeps_successful_reference(self):
         node = CVEAwareSummarizerNode(
@@ -84,22 +90,24 @@ class ReferenceWarningTests(unittest.TestCase):
             {"XSS": "Cross-site scripting"},
         )
 
-        state = node(
-            {
-                "cve_id": "CVE-TEST-1",
-                "nvd_description": "Description",
-                "nvd_filtered_chunks": {
-                    "https://failed.example.test": ["failed evidence"],
-                    "https://usable.example.test": ["usable evidence"],
-                },
-            }
-        )
+        with patch("Graph.Nodes.summarizers.report_warning") as report_warning:
+            state = node(
+                {
+                    "cve_id": "CVE-TEST-1",
+                    "nvd_description": "Description",
+                    "nvd_filtered_chunks": {
+                        "https://failed.example.test": ["failed evidence"],
+                        "https://usable.example.test": ["usable evidence"],
+                    },
+                }
+            )
 
         self.assertEqual(
             state["summaries"],
             {"https://usable.example.test": "Usable technical evidence"},
         )
         self.assertEqual(state["pipeline_warnings"][0]["stage"], "summarize")
+        report_warning.assert_called_once()
 
 
 if __name__ == "__main__":
