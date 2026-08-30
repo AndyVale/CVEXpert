@@ -11,7 +11,8 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Documentation commit completed: `c95e0f0` (`docs: add repository guidance for coding agents`)
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
-- Current phase: provider-neutral local TOML configuration and uv project metadata are implemented and verified; return to the next measured P1 quality or acquisition unit.
+- Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
+- Current phase: provider-neutral local TOML configuration, uv project metadata, embedding request-shape control, and model request pacing are implemented; return to the next measured P1 quality or acquisition unit.
 - Flat taxonomy, `CVE_TEST`, prompts, pipeline stage order, and artifact shape remain unchanged. Former hard-coded model/stage/evaluation values are now validated local TOML settings; the tracked template uses generic model placeholders while retaining the previous non-model pipeline parameters as examples.
 
 ## Durable user decisions
@@ -37,6 +38,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 17. `pyproject.toml` is the sole direct dependency declaration, `uv.lock` is committed, and `requirements.txt` has been removed.
 18. The declared Python baseline is `>=3.12`. The project remains deliberately non-packaged until a separate source-layout/CLI refactor is justified.
 19. The obsolete `src/test.py` replay experiment has been removed. Preserve `StateFromFileLoader` as a tested utility, but add any future replay feature as an explicit, versioned resume-stage interface rather than another manually configured script.
+20. Chat and embedding endpoints use separate configurable minimum request intervals. The chat interval is shared across summarizer and classifier calls; the embedding interval is shared across semantic chunking and filtering. This addresses RPM quotas but deliberately does not attempt token-per-minute accounting yet.
 
 ## Repository understanding
 
@@ -120,7 +122,7 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
 - Local observation on 2026-08-30: `uv 0.11.26`, Python `3.14.6`, the new 85-package lock resolves, the synchronized environment is consistent, and runtime imports succeed.
 - `config.toml` is resolved relative to the repository root and contains both endpoint API keys directly. `.env` is not read. API-key fields are hidden from dataclass representations, but the full configuration object must still be treated as sensitive.
-- The repository now has 37 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
+- The repository now has 42 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction and request pacing, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
 
 ## Documentation inconsistencies
 
@@ -182,15 +184,15 @@ Implemented in the first reliability batch:
 
 Remaining follow-up: the fixed `0.6` threshold must be recalibrated on pinned artifacts because correcting the math changes its meaning when an endpoint previously returned unnormalized vectors.
 
-### P1 — Live acquisition still lacks caching, throttling, and retry policy
+### P1 — Live acquisition still lacks caching and retry policy
 
 The old eight-run/160-NVD-request burst is resolved: the default now makes one stable-order pass and at most one NVD request per benchmark CVE. The previous eight files were never averaged, so temperature zero plus one run matches the confirmed intent.
 
 Remaining evidence:
 
 - A full benchmark still performs 20 fresh NVD requests and repeats page, embedding, summary, and classification work on every invocation.
-- There is no NVD API-key support, bounded retry/backoff, shared limiter, response cache, or persistent preprocessing artifact.
-- Reference sites and model endpoints have no explicit service-specific concurrency/rate/cost policy.
+- There is no NVD API-key support, bounded retry/backoff, NVD/reference limiter, response cache, or persistent preprocessing artifact.
+- Model endpoints now have configurable minimum request intervals, but no token-per-minute accounting, adaptive handling of quota headers, or persistent request/cost telemetry.
 
 Impact:
 
@@ -200,7 +202,7 @@ Impact:
 Approach:
 
 - Fetch and persist deterministic source/preprocessing artifacts once per CVE.
-- Add API-key-aware NVD headers, bounded retry/backoff, a shared rate limiter, and explicit timeouts/content limits.
+- Add API-key-aware NVD headers, bounded retry/backoff, acquisition rate limiting, and explicit timeouts/content limits.
 - Run any future stochastic or prompt comparison from the same pinned artifact stage.
 
 ### P1 — Semantic chunking is unusually aggressive
@@ -419,11 +421,11 @@ Approach:
 Do not start all of these at once. Keep each unit reviewable and measure behavior after each quality-affecting change.
 
 1. **Completed reliability foundation**
-   - Added an offline unit suite that currently has 37 tests covering evaluator/runner, TOML configuration, provider-neutral client construction, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
+   - Added an offline unit suite that currently has 42 tests covering evaluator/runner, TOML configuration, provider-neutral client construction and pacing, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
    - Defined terminal error and degraded-warning semantics, fail-fast mode-aware configuration, classifier invariants, deterministic single-run behavior, coverage reporting, and correct cosine normalization.
    - Still needed from the original contract work: a versioned artifact manifest and controlled integration fixtures.
 2. **Reliable acquisition and artifacts — recommended next**
-   - Add NVD key support, bounded retry/backoff, shared rate limiting, English-description selection, richer structured fields, caching, and provenance.
+   - Add NVD key support, bounded retry/backoff, acquisition rate limiting, English-description selection, richer structured fields, caching, and provenance.
    - Add safe bounded scraping with content-type/size validation.
    - Define versioned resume artifacts before optimizing prompts/retrieval against mutable live inputs.
 3. **Reusable pipeline and benchmark split**
@@ -456,7 +458,7 @@ These are proposals, not authorization to edit production code:
 
 - What public interface should the reusable classifier expose first: Python API, CLI, or both?
 - Is an NVD API key available for development/production, and what request-rate policy should be enforced?
-- What concurrency and cost limits apply to each chat and embedding endpoint?
+- What token accounting, adaptive quota handling, and cost telemetry should supplement the configured model-request intervals?
 - Which stages and fields must version 1 of the replay artifact support?
 - Should cached source pages be stored in repository-external artifacts, logs, or a dedicated cache directory?
 - Who will approve benchmark annotation changes, especially ambiguous mechanism-versus-impact cases?
@@ -507,6 +509,14 @@ These are proposals, not authorization to edit production code:
 - Marked secret dataclass fields with `repr=False`, added empty-key and representation regression tests, and kept `config.example.toml` limited to obvious placeholders.
 - Expanded `.gitignore` to cover `config.toml` and `config.*.toml` while explicitly re-allowing `config.example.toml`.
 - Removed the direct `python-dotenv` dependency; it may remain in `uv.lock` transitively through third-party packages.
+
+### 2026-08-30 — Model request pacing and embedding compatibility
+
+- `d023bae` added separate `[chat].request_delay_seconds` and `[embedding].request_delay_seconds` settings. A thread-safe minimum-interval hook paces every synchronous HTTP attempt, including SDK retries; summarizer/classifier calls share one chat pacer and semantic-chunker/filter calls share one embedding pacer.
+- Added `[embedding].check_embedding_ctx_length` so raw-text versus OpenAI token-array behavior is provider-neutral and explicitly configurable rather than hard-coded for one service.
+- The ignored local configuration uses modest headroom over the currently reported RPM limits. The tracked example remains provider-neutral, uses `0.0`, and documents the `60 / RPM` calculation. Token-per-minute enforcement remains deferred until measurements show it is necessary.
+- Declared the directly imported `openai` client in `pyproject.toml` and updated `uv.lock` without changing the resolved package set.
+- Added five regression tests, bringing the offline suite to 42 passing tests. Compilation, lock consistency, installed dependency consistency, and whitespace checks also passed. No NVD, reference, embedding, or chat request was made during verification.
 
 ## Notes maintenance checklist
 

@@ -32,6 +32,10 @@ Replace the `[chat].api_key` and `[embedding].api_key` placeholders in your loca
 
 The loader rejects missing tables, unknown settings, empty API keys, and invalid URLs or ranges before constructing clients. Secret fields are excluded from the configuration object's representation to reduce accidental logging.
 
+`[chat].request_delay_seconds` and `[embedding].request_delay_seconds` set the minimum interval between consecutive outbound HTTP attempts for each service. Use a value slightly greater than `60 / requests-per-minute`; set it to `0.0` only when pacing is unnecessary. Chat pacing is shared by summarization and classification, while embedding pacing is shared by semantic chunking and cosine filtering. SDK retries are paced too. This controls request frequency only—it does not enforce token-per-minute quotas.
+
+`[embedding].check_embedding_ctx_length` controls LangChain's OpenAI-specific tokenization and automatic length splitting. `false` sends raw text, which is accepted by a broader range of OpenAI-compatible endpoints; callers must then keep inputs within the selected model's limits.
+
 ## Run
 
 The active entry point evaluates the 20 CVEs in `CVE_TEST` once, in insertion order:
@@ -40,7 +44,7 @@ The active entry point evaluates the 20 CVEs in `CVE_TEST` once, in insertion or
 uv run python src/CVE_expert_seq.py
 ```
 
-This is a live workflow: it contacts NVD, downloads external pages, and invokes the configured embedding and chat endpoints. It has no persistent cache, retry policy, or rate limiter yet. Review the likely request volume and service cost before running it.
+This is a live workflow: it contacts NVD, downloads external pages, and invokes the configured embedding and chat endpoints. Model requests have configurable minimum-interval pacing, but there is no persistent cache, acquisition retry policy, or token-per-minute limiter. Review the likely request volume and service cost before running it.
 
 By default, the template writes `logs/LOG_GPT_NORANDAware/RUN_0.json`. The log directory and run number are configurable in `[evaluation]`.
 
