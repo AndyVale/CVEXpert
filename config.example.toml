@@ -5,15 +5,15 @@
 [chat]
 base_url = "http://localhost:8000/v1"
 api_key_env = "CVEXPERT_CHAT_API_KEY"
-classifier_model = "openai/gpt-oss-20b"
+classifier_model = "your-classifier-model"
 classifier_temperature = 0.0
-summarizer_model = "openai/gpt-oss-20b"
+summarizer_model = "your-summarizer-model"
 summarizer_temperature = 0.0
 
 [embedding]
 base_url = "http://localhost:8001/v1"
 api_key_env = "CVEXPERT_EMBEDDING_API_KEY"
-model = "Qwen/Qwen3-Embedding-4B"
+model = "your-embedding-model"
 
 [nvd]
 base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"

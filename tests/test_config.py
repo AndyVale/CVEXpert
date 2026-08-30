@@ -85,7 +85,7 @@ class RuntimeConfigurationTests(unittest.TestCase):
         )
         self.assertNotIn("chat-token", str(raised.exception))
 
-    def test_replay_validation_can_omit_embedding_secret(self):
+    def test_post_embedding_validation_can_omit_embedding_secret(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = self._write_config(temp_dir)
             settings = config.load_runtime_config(

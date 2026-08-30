@@ -4,40 +4,45 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 
 ## Current status
 
-- Last updated: 2026-08-29 (Europe/Rome)
+- Last updated: 2026-08-30 (Europe/Rome)
 - Active branch: `main`
-- Linear code snapshot reviewed and fixed through: `9a3a704` (`fix: compute true cosine similarity`)
+- Linear code snapshot implemented through: `d175957` (`build: manage dependencies with uv project metadata`)
 - Graph branch snapshot reviewed for comparison: `graphCVExpert` at `411baf6`
 - Documentation commit completed: `c95e0f0` (`docs: add repository guidance for coding agents`)
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
-- Current phase: P0 reliability/correctness fixes complete; plan and measure the next P1 quality or acquisition unit before editing.
-- Dependencies, flat taxonomy, `CVE_TEST`, prompts, semantic threshold, retrieval query, log path, and artifact shape remain unchanged.
+- Current phase: provider-neutral TOML configuration and uv project metadata are implemented; document and verify the migration, then return to the next measured P1 quality or acquisition unit.
+- Flat taxonomy, `CVE_TEST`, prompts, pipeline stage order, and artifact shape remain unchanged. Former hard-coded model/stage/evaluation values are now validated local TOML settings; the tracked template uses generic model placeholders while retaining the previous non-model pipeline parameters as examples.
 
 ## Durable user decisions
 
 1. Work exclusively on the first, linear implementation on `main` after the initial two-branch review.
 2. Treat code as authoritative and cross-check all documentation against it.
 3. Maintain this file as a persistent second memory for understanding, decisions, findings, work state, and open questions.
-4. Prefer more numerous, small, logically isolated commits. Documentation commits are authorized directly; explain and discuss bug fixes or larger behavior changes before implementation.
+4. Prefer logically cohesive commits. Commits may be larger when a change naturally spans tests and integration, while unrelated configuration, dependency, documentation, benchmark, and architectural work should remain separated. Explain and discuss bug fixes or larger behavior changes before implementation.
 5. The desired long-term product shape is both:
    - a reusable classifier that can process arbitrary individual/batch CVEs; and
    - a separate, repeatable benchmark/evaluation harness.
 6. The active linear taxonomy is flat: `CVE_TEST` refers to `LABELS_DESCRIPTIONS`. `VULNERABILITY_TREE` belongs to the graph experiment and is ignored by the active linear pipeline.
 7. Preserve the option to support either flat or hierarchical taxonomies in the future, but keep the current flat behavior that matches the linear benchmark.
 8. Intended flat-label semantics are evidence-backed multi-label classification: return each supported mechanism directly supported by evidence, and make `NONE` mutually exclusive. The existing fixture has not yet been re-audited against this intent.
-9. Chat and embedding models use separate hosts and tokens. Embedding configuration can be avoided when resuming from a JSON artifact that already contains a later-stage result such as filtered chunks.
+9. Chat and embedding clients use independently configurable complete OpenAI-compatible base URLs, model identifiers, and credential-variable names. They may share a URL or credential when appropriate. Embedding credential validation can be avoided when resuming from a JSON artifact that already contains a later-stage result such as filtered chunks.
 10. Future replay should resume from explicit named stages (for example, filtered chunks, summaries, or classification context), using a versioned artifact rather than a hard-coded one-off loader.
 11. Operational/model failure is not a classification. `NONE` is valid only after a successful, validated classifier response.
 12. Individual reference scrape, chunk, and summary failures are recoverable and make a result `degraded`; NVD, filtering, formatter-precondition, and classifier failures are terminal for that CVE.
-13. The old eight-run benchmark did not calculate an average. It has been replaced with one insertion-order run and temperature `0.0` for summarizer and classifier. Provider/runtime behavior may still vary.
+13. The old eight-run benchmark did not calculate an average. It has been replaced with one insertion-order run. The tracked TOML template keeps temperature `0.0` for summarizer and classifier, though local configuration can override it; provider/runtime behavior may still vary.
 14. Partial-run metrics exclude terminal errors but must report coverage and `complete: false`; degraded classifications remain scored.
+15. `config.toml` is local and ignored. `config.example.toml` is the tracked, provider-neutral schema example. Neither TOML file may contain credential values; TOML names environment variables whose values are loaded from ignored `.env`.
+16. Runtime configuration must not encode assumptions about a particular provider. Complete URLs and arbitrary model/key-variable names are accepted under the OpenAI-compatible client contract.
+17. `pyproject.toml` is the sole direct dependency declaration, `uv.lock` is committed, and `requirements.txt` has been removed.
+18. The declared Python baseline is `>=3.12`. The project remains deliberately non-packaged until a separate source-layout/CLI refactor is justified.
+19. The obsolete `src/test.py` replay experiment has been removed. Preserve `StateFromFileLoader` as a tested utility, but add any future replay feature as an explicit, versioned resume-stage interface rather than another manually configured script.
 
 ## Repository understanding
 
 ### What the current program actually is
 
-Despite the README describing a general AI tool for CVE understanding, the active entry point is still primarily a benchmark script. `src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, and `main()`. `main()` builds one LangChain `RunnableSequence` and processes the 20 hard-coded `CVE_TEST` cases once in insertion order.
+The active entry point is still primarily a benchmark script. `src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, and `main()`. `main()` loads the ignored local `config.toml`, builds one LangChain `RunnableSequence`, and processes the 20 hard-coded `CVE_TEST` cases once in insertion order.
 
 Each CVE invocation performs the entire live workflow:
 
@@ -56,14 +61,14 @@ cve_id
 
 There is no acquisition, page, chunk, embedding, or summary cache. The default run no longer repeats the same benchmark eight times, but each CVE still performs fresh live work.
 
-### Selected live components and defaults
+### Selected live components and tracked template values
 
 - Entry point: `src/CVE_expert_seq.py`
 - Benchmark cases: 20
 - Evaluation runs: 1, sequential, stable `CVE_TEST` order
-- Chat/classifier model: `openai/gpt-oss-20b`
-- Summarizer model: `openai/gpt-oss-20b`
-- Embedding model: `Qwen/Qwen3-Embedding-4B`
+- Chat/classifier model: user-selected placeholder
+- Summarizer model: user-selected placeholder
+- Embedding model: user-selected placeholder
 - Chat/classifier temperature: `0.0`
 - Summarizer temperature: `0.0`
 - Maximum successfully extracted reference pages: 10
@@ -71,7 +76,9 @@ There is no acquisition, page, chunk, embedding, or summary cache. The default r
 - Filter: `CosineFilterNode`, query `What type of vulnerability is it?`, threshold `0.6`
 - Summarizer: `CVEAwareSummarizerNode`
 - Classifier: `CVEClassifierNode`
-- Output directory name is hard-coded as `logs/LOG_GPT_NORANDAware`, independent of the computed pipeline identifier.
+- Template output location: `logs/LOG_GPT_NORANDAware/RUN_0.json`; both directory and run number are configurable.
+
+These are configuration-shape examples, not provider-specific application defaults. Model identifiers must be replaced for the selected endpoints. The live program requires a user-created ignored `config.toml` and has no fallback constants for these values.
 
 ### Stage state
 
@@ -99,32 +106,29 @@ Only `cve_id` is required in `CVEClassifierState`; stage outputs are optional. S
 - A successful state with warnings logs as `degraded`; without warnings it logs as `success`; a terminal exception logs as `error` with compatibility fields `error_message` and `["ERROR"]`.
 - Aggregate metrics score successful and degraded states, exclude errors, and include `total`, `scored`, `successful`, `degraded`, `failed`, and `complete`.
 
-### Replay experiment
+### Resume support
 
-`src/test.py` is not a test suite. It duplicates much of the benchmark runner, loads selected fields from an existing log with `StateFromFileLoader`, and then runs summarization, formatting, and a five-call self-consistency classifier. Its `LOG_FILE_PATH` is an absolute `/home/andyvale/...` path that does not match the current machine. The loader silently omits requested fields absent from a log entry.
-
-Because this replay starts from `nvd_filtered_chunks`, it does not construct or call the embedding client. It still needs a chat endpoint/token and a compatible JSON log.
+The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. `StateFromFileLoader` remains available and tested, but it silently omits requested fields absent from a log entry. There is no supported replay entry point. Future work should introduce named, versioned resume stages and validate artifact compatibility explicitly.
 
 ### Dependencies and environment
 
-- Dependency declaration: only `requirements.txt`, with broad minimum versions.
-- Missing project metadata: no `pyproject.toml`, declared Python range, lockfile, lint/type/test configuration, or CI.
-- Several direct imports are undeclared and currently arrive transitively: `langchain-core`, `langchain-text-splitters`, `numpy`, `requests`, and `tqdm`.
-- Several declared libraries are unused by the selected live path.
+- `pyproject.toml` declares Python `>=3.12`, project metadata, and all packages directly imported by the active code.
+- `uv.lock` pins the complete resolution; `requirements.txt` was removed by explicit user request.
+- The project uses `tool.uv.package = false`: uv manages its environment, but the script-oriented source tree is not built or installed as a package.
+- Former default dependencies for local Hugging Face/transformer experiments were removed because the active pipeline uses remote OpenAI-compatible clients and does not import them.
+- `uv.lock` contains `langgraph` transitively because current `langchain` depends on it; active CVExpert code still does not import or use LangGraph.
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
-- Local observation on 2026-08-29: `uv 0.11.26`, Python `3.14.6`, 101 installed packages, dependency check clean, and runtime imports successful.
-- Local observation on 2026-08-29: the `.env` contains the chat host/token names but not the two embedding variable names required by the full live entry point. Values were not displayed. Recheck rather than assuming this remains true.
-- `.env` is now resolved relative to the repository root. Live validation requires chat and embedding settings; replay validation can omit embeddings. Missing-setting errors contain names only.
-- The repository now has 33 offline standard-library `unittest` cases covering configuration, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
+- Local observation on 2026-08-30: `uv 0.11.26`, Python `3.14.6`, the new 85-package lock resolves, the synchronized environment is consistent, and runtime imports succeed.
+- `config.toml` and `.env` are resolved relative to the repository root. Live validation requires the chat and embedding credential variables named by TOML; a future post-embedding resume workflow can call validation with `require_embedding=False`. Missing-setting errors contain names only.
+- The repository now has 38 offline standard-library `unittest` cases covering typed TOML parsing/validation, provider-neutral client construction, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
 
 ## Documentation inconsistencies
 
-- `README.md` is only a short project motivation. It contains no setup, configuration, run, test, architecture, taxonomy, evaluation, or output documentation.
+- The README now documents uv setup, provider-neutral TOML/environment configuration, the live entry point, pipeline, output, and offline verification. It remains intentionally concise rather than a full architecture specification.
 - The current README no longer embeds `imgs/system.png`; an earlier revision did.
 - `imgs/system.png` is stale: it omits explicit chunking, NVD reference ranking, embeddings, the benchmark runner, failure/degraded states, and evaluation metrics.
 - Scraper documentation says references are randomly shuffled, but the current function does not shuffle them; it processes NVD-ranked order.
 - Several stage docstrings call ordinary callable stages “LangGraph nodes” even though `main` uses LangChain sequencing.
-- `src/test.py` is named like an automated test but is a manually configured experiment.
 - Some NVD docstrings still mention raw HTTP errors even though the implementation now wraps request/parsing errors in `PipelineStageError`.
 
 ## Two-branch review
@@ -378,21 +382,21 @@ Approach:
 - Use atomic writes or append-only per-CVE records plus a final manifest.
 - Separate reusable stage artifacts from concise evaluation results.
 
-### P2 — Entry points and configuration are tightly coupled
+### Partially resolved P2 — Entry points and configuration are tightly coupled
 
 Evidence:
 
-- Models, thresholds, run counts, endpoints, and log directory names are code constants.
-- `build_pipeline()` is now reusable and `main()` is testable, but benchmark execution, scoring, persistence, and live construction still share one module.
-- `src/test.py` duplicates runner/logging code.
+- Models, temperatures, endpoint URLs, credential-variable names, NVD URL/timeout, reference limit, semantic threshold, cosine query/threshold, run number, and log directory now come from typed, validated TOML settings.
+- `build_pipeline(runtime_config)` is reusable and `main()` is testable, but benchmark execution, scoring, persistence, and live construction still share one module.
+- The duplicate replay runner has been removed; no supported resume entry point currently exists.
 
 Approach:
 
-- Introduce typed configuration and explicit pipeline/runner factories.
+- Typed configuration is complete; introduce separate pipeline/runner factories and commands when splitting the reusable classifier from the benchmark.
 - Provide separate classify and benchmark commands.
 - Keep resume-stage selection an input rather than a separate copied script.
 
-### P2 — Structure and dependency hygiene impede safe change
+### Partially resolved P2 — Structure and dependency hygiene impede safe change
 
 Evidence:
 
@@ -400,22 +404,22 @@ Evidence:
 - Prompts are embedded in large classes, making versioning and prompt-only tests difficult.
 - The entry points use wildcard evaluator imports.
 - Broad exceptions obscure expected failure modes.
-- The 33-case offline unit regression suite covers the first reliability batch, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
-- Dependencies are unpinned and not reproducibly locked.
+- The 38-case offline unit regression suite covers the reliability and configuration migrations, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
+- Dependencies are now declared and reproducibly locked. The remaining structural issues are module layout, prompt isolation, experiment cleanup, and CI/integration coverage.
 
 Approach:
 
 - Add tests before moving modules.
 - Externalize/version prompts and schemas.
 - Gradually introduce a neutral pipeline namespace with compatibility imports if a move is justified.
-- Declare direct dependencies and a Python range, then create a reviewed lockfile in a dedicated dependency commit.
+- Keep `pyproject.toml` and `uv.lock` synchronized in dedicated dependency changes.
 
 ## Recommended improvement sequence
 
 Do not start all of these at once. Keep each unit reviewable and measure behavior after each quality-affecting change.
 
 1. **Completed reliability foundation**
-   - Added 33 offline unit tests for evaluator/runner, configuration, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
+   - Added an offline unit suite that has grown to 38 tests covering evaluator/runner, TOML configuration, provider-neutral client construction, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
    - Defined terminal error and degraded-warning semantics, fail-fast mode-aware configuration, classifier invariants, deterministic single-run behavior, coverage reporting, and correct cosine normalization.
    - Still needed from the original contract work: a versioned artifact manifest and controlled integration fixtures.
 2. **Reliable acquisition and artifacts — recommended next**
@@ -425,7 +429,7 @@ Do not start all of these at once. Keep each unit reviewable and measure behavio
 3. **Reusable pipeline and benchmark split**
    - Extract model/stage factories and a reusable single/batch classify API.
    - Build a separate benchmark runner on top.
-   - Replace `src/test.py` with named resume-stage behavior.
+   - Add named resume-stage behavior only after a versioned artifact contract exists; the obsolete replay script has been removed.
 4. **Retrieval and evidence quality experiments**
    - Evaluate chunkers, target-specific retrieval, top-k/token limits, batching, and structured evidence extraction one variable at a time.
    - Add prompt-injection tests and preserve source citations.
@@ -435,7 +439,7 @@ Do not start all of these at once. Keep each unit reviewable and measure behavio
    - Expand label/negative coverage and add held-out evaluation.
    - Add per-label, exact-match, stability, latency, and cost reporting.
 6. **Only then consider larger structural cleanup**
-   - Neutral module names, packaging, prompt modules, dependency locking, CI, and optional taxonomy interfaces.
+   - Neutral module names, packaging, prompt modules, CI, and optional taxonomy interfaces. Dependency locking is complete.
    - Do not adopt LangGraph merely to reuse graph-branch improvements.
 
 ## Candidate first change units
@@ -457,7 +461,6 @@ These are proposals, not authorization to edit production code:
 - Should cached source pages be stored in repository-external artifacts, logs, or a dedicated cache directory?
 - Who will approve benchmark annotation changes, especially ambiguous mechanism-versus-impact cases?
 - What minimum evidence format is required for a label to be accepted: source ID, quote/span, URL, confidence, or all of these?
-- What Python version should become the declared project baseline?
 
 ## Work log
 
@@ -487,6 +490,16 @@ These are proposals, not authorization to edit production code:
 - Final offline suite at the code snapshot: 33 tests passing. Python compilation and `uv pip check` passed.
 - Taxonomy, benchmark fixture, prompts, threshold `0.6`, semantic threshold `25`, retrieval query, dependencies, and runtime artifact path/schema were deliberately left unchanged.
 - No NVD request, page scrape, embedding request, chat/LLM request, Hugging Face Hub operation, or credential disclosure occurred during implementation or verification.
+
+### 2026-08-30 — Provider-neutral TOML and uv migration
+
+- `c41ddde` replaced endpoint/model constants with typed, strict `config.toml` loading; added the tracked provider-neutral `config.example.toml`; ignored local `config.toml`; and kept secrets exclusively in environment variables named by TOML.
+- Complete chat and embedding base URLs are now passed through unchanged. NVD URL/timeout, maximum reference pages, semantic threshold, cosine query/threshold, and evaluation location/run number are also injected from the same validated settings object.
+- The linear pipeline sequence and classification behavior did not change. The live entry point now loads configuration once and passes it to pipeline construction and evaluation metadata.
+- `d175957` added `pyproject.toml`, declared Python `>=3.12` and direct imports, created `uv.lock`, removed unused local-transformer dependencies from the default environment, and removed `requirements.txt` by user request.
+- Removed the obsolete `src/test.py` replay experiment and its machine-specific path while retaining the tested `StateFromFileLoader` utility for future versioned resume work.
+- Expanded and updated README/agent guidance for `uv sync`, local TOML creation, arbitrary OpenAI-compatible endpoints, credential-variable indirection, and safe offline verification.
+- Synchronized the lock into `.venv`; all 38 offline tests, compilation, `uv lock --check`, `uv pip check`, and whitespace checks passed. No NVD, web scraping, embedding, or chat/model request was made.
 
 ## Notes maintenance checklist
 
