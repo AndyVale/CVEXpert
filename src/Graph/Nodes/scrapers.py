@@ -2,15 +2,18 @@ import trafilatura
 from tqdm import tqdm
 from Graph.errors import make_pipeline_warning
 from Graph.state import CVEClassifierState
-from Definitions.config import REF_MAX
 
-def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
+def extract_md_trafilatura(
+    state: CVEClassifierState,
+    *,
+    max_pages: int,
+) -> CVEClassifierState:
     """
     Fetches and extracts Markdown content from NVD reference URLs using Trafilatura.
 
     This function randomly shuffles the available reference URLs to ensure a diverse 
-    sample and avoid processing bias. It attempts to download and extract content 
-    in Markdown format (prioritizing recall) until a defined limit (`REF_MAX`) 
+    sample and avoid processing bias. It attempts to download and extract content
+    in Markdown format (prioritizing recall) until the configured page limit
     of successfully extracted pages is reached.
 
     Args:
@@ -37,7 +40,7 @@ def extract_md_trafilatura(state: CVEClassifierState) -> CVEClassifierState:
 
             pages_dict[url_ref] = text
 
-            if len(pages_dict) >= REF_MAX:
+            if len(pages_dict) >= max_pages:
                 break
 
         except Exception as error:

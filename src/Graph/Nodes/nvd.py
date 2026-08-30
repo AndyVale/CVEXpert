@@ -37,7 +37,12 @@ def __nvd_resource_reorder(refs: list, weights: dict = None) -> list[str]:
 
     return [url for _, url in sorted(ranked_refs, key=lambda x: x[0])]
 
-def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
+def nvd_caller(
+    state: CVEClassifierState,
+    *,
+    base_url: str,
+    timeout_seconds: float,
+) -> CVEClassifierState:
     """
     Retrieves official CVE information from the National Vulnerability Database (NVD) API.
 
@@ -56,11 +61,10 @@ def nvd_caller(state: CVEClassifierState) -> CVEClassifierState:
     """
     print("Contacting NVD API")
     cve_id = state["cve_id"]
-    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     params = {"cveId": cve_id}
     
     try:
-        resp = requests.get(url, params=params, timeout=20)
+        resp = requests.get(base_url, params=params, timeout=timeout_seconds)
         resp.raise_for_status()
         data = resp.json()
 

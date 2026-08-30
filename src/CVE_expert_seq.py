@@ -5,24 +5,14 @@ Linear workflow to classify CVEs against list of labels.
 import os
 import json
 import time
+from functools import partial
 
 from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 
 from Definitions.const import CVE_TEST
-from Definitions.config import (
-    CHAT_MODEL,
-    CHAT_MODEL_TEMP,
-    EMBEDDING_MODEL,
-    OPEN_BUTTON_TOKEN_EMBEDDING,
-    OPEN_BUTTON_TOKEN_MODEL,
-    SUMMARIZER_MODEL,
-    SUMMARIZER_MODEL_TEMP,
-    VAST_IP_PORT_EMBEDDING,
-    VAST_IP_PORT_MODEL,
-    validate_runtime_config,
-)
+from Definitions.config import RuntimeConfig, read_api_key, validate_runtime_config
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
@@ -30,7 +20,7 @@ from Graph.Nodes.scrapers import extract_md_trafilatura
 from Graph.Nodes.chunkers import SemanticChunkerNode
 from Graph.Nodes.filters import CosineFilterNode
 from Graph.Nodes.summarizers import CVEAwareSummarizerNode
-from Graph.Nodes.evaluators import *
+from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_scores
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 from Graph.errors import PipelineStageError
@@ -52,31 +42,31 @@ def _serialize_pipeline_error(error, cve_id):
     )
     return details, safe_message
 
-def run_evaluation(pipeline_instance, pipeline_names, run_number=0):
+def run_evaluation(
+    pipeline_instance,
+    pipeline_names,
+    runtime_config: RuntimeConfig,
+    run_number: int | None = None,
+):
     """Run one ordered benchmark pass while isolating failures per CVE."""
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    log_dir = os.path.join(os.path.dirname(base_dir), "logs")
-    
-    # Create a unique folder for this pipeline configuration
-    run_id_str = '_'.join(pipeline_names)
-    run_folder = os.path.join(log_dir, f"LOG_GPT_NORANDAware")
-    os.makedirs(run_folder, exist_ok=True)
-    
-    output_file = os.path.join(run_folder, f"RUN_{run_number}.json")
+    if run_number is None:
+        run_number = runtime_config.evaluation.run_number
 
-    print(f"[Run {run_number}] Starting. Log: {os.path.basename(output_file)}")
+    run_id_str = '_'.join(pipeline_names)
+    run_folder = runtime_config.evaluation.resolved_log_directory()
+    os.makedirs(run_folder, exist_ok=True)
+
+    output_file = run_folder / f"RUN_{run_number}.json"
+
+    print(f"[Run {run_number}] Starting. Log: {output_file.name}")
 
     log = {
         "pipeline_metadata": {
             "run_id": run_id_str,
             "RUN_N": run_number + 1,
             "pipeline_structure": pipeline_names, # Fixed variable name usage
-            "models": {
-                "chat_model": CHAT_MODEL,
-                "summarizer_model": SUMMARIZER_MODEL,
-                "embedding_model": EMBEDDING_MODEL
-            },
+            "models": runtime_config.model_metadata,
             "labels_schema": LABELS_DESCRIPTIONS
         },
         "cves": {},
@@ -177,44 +167,47 @@ def run_evaluation(pipeline_instance, pipeline_names, run_number=0):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(log, f, indent=2)
 
-    print(f"\n[Run {run_number}] COMPLETED. File: {os.path.abspath(output_file)}")
+    print(f"\n[Run {run_number}] COMPLETED. File: {output_file.resolve()}")
     return f"Finished: Run {run_number}"
 
 
-def build_pipeline():
+def build_pipeline(runtime_config: RuntimeConfig):
     """Construct the configured live linear pipeline after validation."""
 
-    validate_runtime_config(require_embedding=True)
-    vast_host = f"http://{VAST_IP_PORT_MODEL}/v1"
-    vast_host_embedding = f"http://{VAST_IP_PORT_EMBEDDING}/v1"
+    chat_api_key = read_api_key(runtime_config.chat.api_key_env)
+    embedding_api_key = read_api_key(runtime_config.embedding.api_key_env)
 
-    print(f"Chat Host: {vast_host}")
-    print(f"Embedding Host: {vast_host_embedding}")
+    print(f"Chat Host: {runtime_config.chat.base_url}")
+    print(f"Embedding Host: {runtime_config.embedding.base_url}")
 
-    # Initialize the embedding model externally
     embedding_model_instance = OpenAIEmbeddings(
-        model=EMBEDDING_MODEL, 
-        api_key=OPEN_BUTTON_TOKEN_EMBEDDING,
-        base_url=vast_host_embedding,
+        model=runtime_config.embedding.model,
+        api_key=embedding_api_key,
+        base_url=runtime_config.embedding.base_url,
     )
 
-    # Inject the model instance into the node
     semantic_chunker = SemanticChunkerNode(
-        embed_model=embedding_model_instance
+        embed_model=embedding_model_instance,
+        breakpoint_threshold_type=(
+            runtime_config.semantic_chunker.breakpoint_threshold_type
+        ),
+        breakpoint_threshold_amount=(
+            runtime_config.semantic_chunker.breakpoint_threshold_amount
+        ),
     )
 
     cosine_filter = CosineFilterNode(
-        query="What type of vulnerability is it?",
+        query=runtime_config.cosine_filter.query,
         embed_model=embedding_model_instance,
-        threshold=0.6
+        threshold=runtime_config.cosine_filter.threshold,
     )
 
     summarizer_llm = init_chat_model(
-        model=SUMMARIZER_MODEL,
+        model=runtime_config.chat.summarizer_model,
         model_provider="openai",
-        api_key=OPEN_BUTTON_TOKEN_MODEL,
-        base_url=vast_host,
-        temperature=SUMMARIZER_MODEL_TEMP,
+        api_key=chat_api_key,
+        base_url=runtime_config.chat.base_url,
+        temperature=runtime_config.chat.summarizer_temperature,
     )
 
     summarizer = CVEAwareSummarizerNode(
@@ -223,11 +216,11 @@ def build_pipeline():
     )
 
     classifier_llm = init_chat_model(
-        model=CHAT_MODEL,
+        model=runtime_config.chat.classifier_model,
         model_provider="openai",
-        api_key=OPEN_BUTTON_TOKEN_MODEL,
-        base_url=vast_host,
-        temperature=CHAT_MODEL_TEMP,
+        api_key=chat_api_key,
+        base_url=runtime_config.chat.base_url,
+        temperature=runtime_config.chat.classifier_temperature,
     )
 
     classifier = CVEClassifierNode(
@@ -235,9 +228,21 @@ def build_pipeline():
         labels_descriptions=LABELS_DESCRIPTIONS,
     )
 
+    configured_nvd_caller = partial(
+        nvd_caller,
+        base_url=runtime_config.nvd.base_url,
+        timeout_seconds=runtime_config.nvd.timeout_seconds,
+    )
+    configured_nvd_caller.__name__ = nvd_caller.__name__
+    configured_scraper = partial(
+        extract_md_trafilatura,
+        max_pages=runtime_config.references.max_pages,
+    )
+    configured_scraper.__name__ = extract_md_trafilatura.__name__
+
     pipeline = (
-        lcr.RunnableLambda(nvd_caller)
-        | extract_md_trafilatura    
+        lcr.RunnableLambda(configured_nvd_caller)
+        | configured_scraper
         | semantic_chunker
         | cosine_filter
         | summarizer
@@ -261,8 +266,9 @@ def build_pipeline():
 def main():
     """Build the live pipeline and run the benchmark exactly once."""
 
-    pipeline, pipeline_component_names = build_pipeline()
-    return run_evaluation(pipeline, pipeline_component_names)
+    runtime_config = validate_runtime_config(require_embedding=True)
+    pipeline, pipeline_component_names = build_pipeline(runtime_config)
+    return run_evaluation(pipeline, pipeline_component_names, runtime_config)
 
 
 if __name__ == "__main__":

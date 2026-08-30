@@ -35,7 +35,8 @@ class ReferenceWarningTests(unittest.TestCase):
             ),
         ):
             state = extract_md_trafilatura(
-                {"cve_id": "CVE-TEST-1", "nvd_url_references": urls}
+                {"cve_id": "CVE-TEST-1", "nvd_url_references": urls},
+                max_pages=10,
             )
 
         self.assertEqual(

@@ -10,18 +10,12 @@ import concurrent.futures
 
 from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
-from langchain_openai import OpenAIEmbeddings
-
 from Definitions.const import CVE_TEST
-from Definitions.config import CHAT_MODEL, CHAT_MODEL_TEMP, SUMMARIZER_MODEL, SUMMARIZER_MODEL_TEMP, EMBEDDING_MODEL, OPEN_BUTTON_TOKEN_MODEL, OPEN_BUTTON_TOKEN_EMBEDDING, VAST_IP_PORT_MODEL, VAST_IP_PORT_EMBEDDING, validate_runtime_config
+from Definitions.config import read_api_key, validate_runtime_config
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.util import StateFromFileLoader
 
-from Graph.Nodes.nvd import nvd_caller
-from Graph.Nodes.scrapers import extract_md_trafilatura
-from Graph.Nodes.chunkers import SemanticChunkerNode
-from Graph.Nodes.filters import CosineFilterNode
 from Graph.Nodes.summarizers import CVEAwareSummarizerNode, ReferenceSummarizerNode
 from Graph.Nodes.evaluators import *
 from Graph.Nodes.formatters import formatter
@@ -32,7 +26,7 @@ def run_evaluation(args):
     Worker function to run a single evaluation iteration.
     Exception handling is applied per-CVE to ensure the run continues even if one fails.
     """
-    RUN_N, pipeline_instance, pipeline_names = args
+    RUN_N, pipeline_instance, pipeline_names, runtime_config = args
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
@@ -51,11 +45,7 @@ def run_evaluation(args):
             "run_id": run_id_str,
             "RUN_N": RUN_N + 1,
             "pipeline_structure": pipeline_names, # Fixed variable name usage
-            "models": {
-                "chat_model": CHAT_MODEL,
-                "summarizer_model": SUMMARIZER_MODEL,
-                "embedding_model": EMBEDDING_MODEL
-            },
+            "models": runtime_config.model_metadata,
             "labels_schema": LABELS_DESCRIPTIONS
         },
         "cves": {},
@@ -128,13 +118,13 @@ def run_evaluation(args):
     return f"Finished: Run {RUN_N}"
         
 if __name__ == "__main__":
-    validate_runtime_config(require_embedding=False)
+    runtime_config = validate_runtime_config(require_embedding=False)
     PARALLEL_EXECUTION = 8
     random.seed(42)
-    VAST_HOST = f"http://{VAST_IP_PORT_MODEL}/v1"
     LOG_FILE_PATH = "/home/andyvale/Documents/cvexpert/logs/OLD_LOGS/LOG_GPT_NORANDAware/RUN_0.json"
 
-    print(f"Chat Host: {VAST_HOST}")
+    print(f"Chat Host: {runtime_config.chat.base_url}")
+    chat_api_key = read_api_key(runtime_config.chat.api_key_env)
 
     state_loader = StateFromFileLoader(
         file_path=LOG_FILE_PATH,
@@ -146,11 +136,11 @@ if __name__ == "__main__":
     )
 
     summarizer_llm = init_chat_model(
-        model=SUMMARIZER_MODEL,
+        model=runtime_config.chat.summarizer_model,
         model_provider="openai",
-        api_key=OPEN_BUTTON_TOKEN_MODEL,
-        base_url=VAST_HOST,
-        temperature=SUMMARIZER_MODEL_TEMP,
+        api_key=chat_api_key,
+        base_url=runtime_config.chat.base_url,
+        temperature=runtime_config.chat.summarizer_temperature,
     )
 
     summarizer = CVEAwareSummarizerNode(
@@ -159,11 +149,11 @@ if __name__ == "__main__":
     )
 
     classifier_llm = init_chat_model(
-        model=CHAT_MODEL,
+        model=runtime_config.chat.classifier_model,
         model_provider="openai",
-        api_key=OPEN_BUTTON_TOKEN_MODEL,
-        base_url=VAST_HOST,
-        temperature=CHAT_MODEL_TEMP,
+        api_key=chat_api_key,
+        base_url=runtime_config.chat.base_url,
+        temperature=runtime_config.chat.classifier_temperature,
     )
 
     classifier = CVESelfConsistentClassifierNode(
@@ -193,7 +183,7 @@ if __name__ == "__main__":
     print(f"Starting {PARALLEL_EXECUTION} evaluations in parallel...")
     
     tasks_args = [
-        (i, pipeline, pipeline_component_names) 
+        (i, pipeline, pipeline_component_names, runtime_config)
         for i in range(PARALLEL_EXECUTION)
     ]
 

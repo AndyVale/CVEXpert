@@ -4,7 +4,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from Definitions import config
+from Definitions.config import (
+    ChatSettings,
+    CosineFilterSettings,
+    EmbeddingSettings,
+    EvaluationSettings,
+    NvdSettings,
+    ReferenceSettings,
+    RuntimeConfig,
+    SemanticChunkerSettings,
+)
 from Definitions.labels import ALL_LABELS
 from Graph.errors import PipelineStageError
 from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_scores
@@ -14,65 +23,39 @@ from Graph.Nodes.util import StateFromFileLoader
 import CVE_expert_seq
 
 
-class RuntimeConfigurationTests(unittest.TestCase):
-    def test_chat_stages_use_zero_temperature(self):
-        self.assertEqual(config.CHAT_MODEL_TEMP, 0.0)
-        self.assertEqual(config.SUMMARIZER_MODEL_TEMP, 0.0)
-
-    def test_dotenv_path_is_anchored_to_repository_root(self):
-        expected_path = Path(config.__file__).resolve().parents[2] / ".env"
-
-        self.assertEqual(config.DOTENV_PATH, expected_path)
-
-    def test_live_validation_requires_chat_and_embedding_settings(self):
-        settings = {
-            "VAST_IP_PORT_MODEL": "chat.test:8000",
-            "OPEN_BUTTON_TOKEN_MODEL": "chat-token",
-            "VAST_IP_PORT_EMBEDDING": None,
-            "OPEN_BUTTON_TOKEN_EMBEDDING": " ",
-        }
-
-        with (
-            patch.multiple(config, **settings),
-            self.assertRaises(config.RuntimeConfigurationError) as raised,
-        ):
-            config.validate_runtime_config(require_embedding=True)
-
-        self.assertEqual(
-            raised.exception.missing_variables,
-            ("VAST_IP_PORT_EMBEDDING", "OPEN_BUTTON_TOKEN_EMBEDDING"),
-        )
-        self.assertNotIn("chat-token", str(raised.exception))
-
-    def test_replay_validation_requires_only_chat_settings(self):
-        settings = {
-            "VAST_IP_PORT_MODEL": "chat.test:8000",
-            "OPEN_BUTTON_TOKEN_MODEL": "chat-token",
-            "VAST_IP_PORT_EMBEDDING": None,
-            "OPEN_BUTTON_TOKEN_EMBEDDING": None,
-        }
-
-        with patch.multiple(config, **settings):
-            config.validate_runtime_config(require_embedding=False)
-
-    def test_missing_chat_settings_fail_in_all_modes(self):
-        settings = {
-            "VAST_IP_PORT_MODEL": None,
-            "OPEN_BUTTON_TOKEN_MODEL": "",
-            "VAST_IP_PORT_EMBEDDING": "embedding.test:8001",
-            "OPEN_BUTTON_TOKEN_EMBEDDING": "embedding-token",
-        }
-
-        with (
-            patch.multiple(config, **settings),
-            self.assertRaises(config.RuntimeConfigurationError) as raised,
-        ):
-            config.validate_runtime_config(require_embedding=False)
-
-        self.assertEqual(
-            raised.exception.missing_variables,
-            ("VAST_IP_PORT_MODEL", "OPEN_BUTTON_TOKEN_MODEL"),
-        )
+def make_runtime_config(log_directory: str) -> RuntimeConfig:
+    return RuntimeConfig(
+        chat=ChatSettings(
+            base_url="https://chat.example.test/v1",
+            api_key_env="CHAT_SECRET",
+            classifier_model="classifier-model",
+            classifier_temperature=0.0,
+            summarizer_model="summarizer-model",
+            summarizer_temperature=0.0,
+        ),
+        embedding=EmbeddingSettings(
+            base_url="https://embedding.example.test/v1",
+            api_key_env="EMBEDDING_SECRET",
+            model="embedding-model",
+        ),
+        nvd=NvdSettings(
+            base_url="https://nvd.example.test/cves/2.0",
+            timeout_seconds=20.0,
+        ),
+        references=ReferenceSettings(max_pages=10),
+        semantic_chunker=SemanticChunkerSettings(
+            breakpoint_threshold_type="percentile",
+            breakpoint_threshold_amount=25.0,
+        ),
+        cosine_filter=CosineFilterSettings(
+            query="relevance query",
+            threshold=0.6,
+        ),
+        evaluation=EvaluationSettings(
+            log_directory=log_directory,
+            run_number=0,
+        ),
+    )
 
 
 class FakePipeline:
@@ -87,6 +70,19 @@ class FakePipeline:
         if isinstance(result, BaseException):
             raise result
         return {"cve_id": cve_id, **result}
+
+
+class FakeEmbeddingsClient:
+    def embed_query(self, _query):
+        return [1.0, 0.0]
+
+    def embed_documents(self, documents):
+        return [[1.0, 0.0] for _document in documents]
+
+
+class FakeChatClient:
+    def with_structured_output(self, _schema):
+        return self
 
 
 class EvaluatorTests(unittest.TestCase):
@@ -180,6 +176,85 @@ class StateLoaderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_build_pipeline_uses_provider_neutral_toml_settings(self):
+        runtime_config = make_runtime_config("logs/test-run")
+        embeddings_client = FakeEmbeddingsClient()
+        chat_client = FakeChatClient()
+
+        def secret_for(variable_name):
+            return {
+                "CHAT_SECRET": "chat-token",
+                "EMBEDDING_SECRET": "embedding-token",
+            }[variable_name]
+
+        with (
+            patch.object(
+                CVE_expert_seq,
+                "read_api_key",
+                side_effect=secret_for,
+            ) as read_secret,
+            patch.object(
+                CVE_expert_seq,
+                "OpenAIEmbeddings",
+                return_value=embeddings_client,
+            ) as embeddings_factory,
+            patch.object(
+                CVE_expert_seq,
+                "init_chat_model",
+                return_value=chat_client,
+            ) as chat_factory,
+        ):
+            pipeline, component_names = CVE_expert_seq.build_pipeline(runtime_config)
+
+        self.assertEqual(
+            [call.args[0] for call in read_secret.call_args_list],
+            ["CHAT_SECRET", "EMBEDDING_SECRET"],
+        )
+        embeddings_factory.assert_called_once_with(
+            model="embedding-model",
+            api_key="embedding-token",
+            base_url="https://embedding.example.test/v1",
+        )
+        self.assertEqual(
+            [call.kwargs for call in chat_factory.call_args_list],
+            [
+                {
+                    "model": "summarizer-model",
+                    "model_provider": "openai",
+                    "api_key": "chat-token",
+                    "base_url": "https://chat.example.test/v1",
+                    "temperature": 0.0,
+                },
+                {
+                    "model": "classifier-model",
+                    "model_provider": "openai",
+                    "api_key": "chat-token",
+                    "base_url": "https://chat.example.test/v1",
+                    "temperature": 0.0,
+                },
+            ],
+        )
+        self.assertEqual(
+            pipeline.steps[0].func.keywords,
+            {
+                "base_url": "https://nvd.example.test/cves/2.0",
+                "timeout_seconds": 20.0,
+            },
+        )
+        self.assertEqual(pipeline.steps[1].func.keywords, {"max_pages": 10})
+        self.assertEqual(
+            component_names,
+            [
+                "nvd_caller",
+                "extract_md_trafilatura",
+                "SemanticChunkerNode",
+                "CosineFilterNode",
+                "CVEAwareSummarizerNode",
+                "formatter",
+                "CVEClassifierNode",
+            ],
+        )
+
     def test_successful_run_writes_expected_artifacts_and_scores(self):
         test_cves = {"CVE-TEST-1": ["XSS"]}
         pipeline = FakePipeline(
@@ -197,24 +272,17 @@ class RunnerTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            fake_module_path = Path(temp_dir) / "src" / "CVE_expert_seq.py"
-            fake_module_path.parent.mkdir()
-            with (
-                patch.object(CVE_expert_seq, "__file__", str(fake_module_path)),
-                patch.object(CVE_expert_seq, "CVE_TEST", test_cves),
-            ):
+            output_directory = Path(temp_dir) / "logs" / "test-run"
+            runtime_config = make_runtime_config(str(output_directory))
+            with patch.object(CVE_expert_seq, "CVE_TEST", test_cves):
                 result = CVE_expert_seq.run_evaluation(
                     pipeline,
                     ["FakePipeline"],
+                    runtime_config,
                     run_number=0,
                 )
 
-            output_path = (
-                Path(temp_dir)
-                / "logs"
-                / "LOG_GPT_NORANDAware"
-                / "RUN_0.json"
-            )
+            output_path = output_directory / "RUN_0.json"
             log = json.loads(output_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result, "Finished: Run 0")
@@ -263,24 +331,17 @@ class RunnerTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            fake_module_path = Path(temp_dir) / "src" / "CVE_expert_seq.py"
-            fake_module_path.parent.mkdir()
-            with (
-                patch.object(CVE_expert_seq, "__file__", str(fake_module_path)),
-                patch.object(CVE_expert_seq, "CVE_TEST", test_cves),
-            ):
+            output_directory = Path(temp_dir) / "logs" / "test-run"
+            runtime_config = make_runtime_config(str(output_directory))
+            with patch.object(CVE_expert_seq, "CVE_TEST", test_cves):
                 CVE_expert_seq.run_evaluation(
                     pipeline,
                     ["FakePipeline"],
+                    runtime_config,
                     run_number=0,
                 )
 
-            output_path = (
-                Path(temp_dir)
-                / "logs"
-                / "LOG_GPT_NORANDAware"
-                / "RUN_0.json"
-            )
+            output_path = output_directory / "RUN_0.json"
             log = json.loads(output_path.read_text(encoding="utf-8"))
 
         self.assertEqual(log["cves"]["CVE-SUCCESS"]["status"], "success")
@@ -312,7 +373,13 @@ class RunnerTests(unittest.TestCase):
 
     def test_main_builds_and_runs_one_evaluation(self):
         pipeline = FakePipeline({})
+        runtime_config = make_runtime_config("logs/test-run")
         with (
+            patch.object(
+                CVE_expert_seq,
+                "validate_runtime_config",
+                return_value=runtime_config,
+            ) as validate,
             patch.object(
                 CVE_expert_seq,
                 "build_pipeline",
@@ -326,8 +393,13 @@ class RunnerTests(unittest.TestCase):
         ):
             result = CVE_expert_seq.main()
 
-        build.assert_called_once_with()
-        run.assert_called_once_with(pipeline, ["FakePipeline"])
+        validate.assert_called_once_with(require_embedding=True)
+        build.assert_called_once_with(runtime_config)
+        run.assert_called_once_with(
+            pipeline,
+            ["FakePipeline"],
+            runtime_config,
+        )
         self.assertEqual(result, "Finished: Run 0")
         self.assertFalse(hasattr(CVE_expert_seq, "concurrent"))
 

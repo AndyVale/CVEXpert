@@ -78,7 +78,11 @@ class NvdFailureTests(unittest.TestCase):
             patch("Graph.Nodes.nvd.requests.get", side_effect=TimeoutError("timeout")),
             self.assertRaises(PipelineStageError) as raised,
         ):
-            nvd_caller({"cve_id": "CVE-TEST-1"})
+            nvd_caller(
+                {"cve_id": "CVE-TEST-1"},
+                base_url="https://nvd.example.test/cves/2.0",
+                timeout_seconds=20,
+            )
 
         self.assertEqual(raised.exception.stage, "nvd")
         self.assertEqual(raised.exception.cve_id, "CVE-TEST-1")
@@ -90,7 +94,11 @@ class NvdFailureTests(unittest.TestCase):
             patch("Graph.Nodes.nvd.requests.get", return_value=response),
             self.assertRaises(PipelineStageError) as raised,
         ):
-            nvd_caller({"cve_id": "CVE-TEST-2"})
+            nvd_caller(
+                {"cve_id": "CVE-TEST-2"},
+                base_url="https://nvd.example.test/cves/2.0",
+                timeout_seconds=20,
+            )
 
         self.assertEqual(raised.exception.stage, "nvd")
         self.assertEqual(raised.exception.error_type, "IndexError")
