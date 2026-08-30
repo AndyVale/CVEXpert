@@ -26,6 +26,7 @@ request_delay_seconds = 0.7
 [nvd]
 base_url = "https://nvd.example.test/cves/2.0"
 timeout_seconds = 12.5
+request_delay_seconds = 6.1
 
 [references]
 max_pages = 7
@@ -67,6 +68,7 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.embedding.request_delay_seconds, 0.7)
         self.assertFalse(settings.embedding.check_embedding_ctx_length)
         self.assertEqual(settings.nvd.timeout_seconds, 12.5)
+        self.assertEqual(settings.nvd.request_delay_seconds, 6.1)
         self.assertEqual(settings.references.max_pages, 7)
         self.assertEqual(settings.evaluation.run_number, 3)
 
@@ -114,6 +116,19 @@ class RuntimeConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 config.RuntimeConfigurationError,
                 r"\[embedding\]\.request_delay_seconds",
+            ):
+                config.load_runtime_config(path)
+
+    def test_negative_nvd_request_delay_is_rejected(self):
+        invalid_config = VALID_CONFIG.replace(
+            "request_delay_seconds = 6.1",
+            "request_delay_seconds = -0.1",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self._write_config(temp_dir, invalid_config)
+            with self.assertRaisesRegex(
+                config.RuntimeConfigurationError,
+                r"\[nvd\]\.request_delay_seconds",
             ):
                 config.load_runtime_config(path)
 
@@ -166,6 +181,7 @@ class RuntimeConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(example["chat"]["request_delay_seconds"], 0.0)
         self.assertEqual(example["embedding"]["request_delay_seconds"], 0.0)
+        self.assertEqual(example["nvd"]["request_delay_seconds"], 6.1)
         self.assertFalse(example["embedding"]["check_embedding_ctx_length"])
 
     def test_default_config_path_is_anchored_to_repository_root(self):

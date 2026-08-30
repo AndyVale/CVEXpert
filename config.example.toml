@@ -24,6 +24,8 @@ request_delay_seconds = 0.0
 [nvd]
 base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 timeout_seconds = 20
+# Keyless NVD access allows five requests per rolling 30 seconds; add headroom.
+request_delay_seconds = 6.1
 
 [references]
 max_pages = 10

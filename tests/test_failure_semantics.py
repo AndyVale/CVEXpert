@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from Graph.errors import PipelineStageError
 from Graph.Nodes.classifiers import (
@@ -74,6 +74,7 @@ class PipelineStageErrorTests(unittest.TestCase):
 
 class NvdFailureTests(unittest.TestCase):
     def test_request_failure_raises_stage_error(self):
+        request_pacer = Mock()
         with (
             patch("Graph.Nodes.nvd.requests.get", side_effect=TimeoutError("timeout")),
             self.assertRaises(PipelineStageError) as raised,
@@ -82,8 +83,10 @@ class NvdFailureTests(unittest.TestCase):
                 {"cve_id": "CVE-TEST-1"},
                 base_url="https://nvd.example.test/cves/2.0",
                 timeout_seconds=20,
+                request_pacer=request_pacer,
             )
 
+        request_pacer.assert_called_once_with()
         self.assertEqual(raised.exception.stage, "nvd")
         self.assertEqual(raised.exception.cve_id, "CVE-TEST-1")
         self.assertEqual(raised.exception.error_type, "TimeoutError")
@@ -98,6 +101,7 @@ class NvdFailureTests(unittest.TestCase):
                 {"cve_id": "CVE-TEST-2"},
                 base_url="https://nvd.example.test/cves/2.0",
                 timeout_seconds=20,
+                request_pacer=lambda: None,
             )
 
         self.assertEqual(raised.exception.stage, "nvd")

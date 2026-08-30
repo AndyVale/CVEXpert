@@ -274,6 +274,11 @@ def render_runtime_config(
         ),
         ("nvd", "endpoint", sanitize_url(runtime_config.nvd.base_url)),
         ("nvd", "timeout (s)", str(runtime_config.nvd.timeout_seconds)),
+        (
+            "nvd",
+            "request delay (s)",
+            str(runtime_config.nvd.request_delay_seconds),
+        ),
         ("references", "maximum pages", str(runtime_config.references.max_pages)),
         (
             "semantic chunker",

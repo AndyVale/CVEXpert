@@ -25,7 +25,7 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `src/Definitions/labels.py`: flat label definitions plus an unused-on-main hierarchical tree.
 - `src/Graph/state.py`: shared `CVEClassifierState` `TypedDict`.
 - `src/Graph/errors.py`: terminal `PipelineStageError` and recoverable `PipelineWarning` records.
-- `src/Graph/request_pacing.py`: thread-safe minimum-interval pacing used by synchronous chat and embedding HTTP clients.
+- `src/Graph/request_pacing.py`: thread-safe minimum-interval pacing shared across synchronous chat, embedding, and NVD requests.
 - `src/Graph/reporting.py`: centralized tqdm-safe console logging, ANSI severity colors, concise diagnostics, redaction, and the verbose runtime-configuration table.
 - `src/Graph/Nodes/`: reusable pipeline stages. The `Graph` name and several LangGraph-oriented docstrings are historical; these objects are also used as ordinary LangChain callables.
 - `tests/`: standard-library `unittest` regression suite. Tests use fakes and must remain offline.
@@ -45,7 +45,7 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 7. `CVEClassifierNode` returns structured flat labels from `LABELS_DESCRIPTIONS` plus `NONE`.
 8. `run_evaluation` compares predictions with `CVE_TEST`, records per-CVE metrics and coverage, and writes a run log.
 
-`main()` loads and validates `config.toml`, builds the pipeline once, and processes `CVE_TEST` once in insertion order. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat and embedding HTTP attempts have separate configurable minimum intervals; summarization and classification share the chat pacer, while semantic chunking and filtering share the embedding pacer.
+`main()` loads and validates `config.toml`, builds the pipeline once, and processes `CVE_TEST` once in insertion order. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat, embedding, and NVD requests have separate configurable minimum intervals; summarization and classification share the chat pacer, semantic chunking and filtering share the embedding pacer, and all CVEs share one NVD pacer.
 
 The CLI accepts `-v`/`--verbose`. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall. Programmatic callers use `main(verbose=False)`.
 
@@ -111,7 +111,7 @@ cp config.example.toml config.toml
 
 `config.toml` stores the complete local configuration, including real `[chat].api_key` and `[embedding].api_key` values. Its supported tables are `[chat]`, `[embedding]`, `[nvd]`, `[references]`, `[semantic_chunker]`, `[cosine_filter]`, and `[evaluation]`. Complete chat and embedding `base_url` values are passed through unchanged; do not rely on implicit scheme or `/v1` manipulation. The configuration is provider-neutral within the OpenAI-compatible API contract. No `.env` file is loaded or required.
 
-`[chat].request_delay_seconds` and `[embedding].request_delay_seconds` are minimum intervals between actual synchronous HTTP attempts, including SDK retries. Use slightly more than `60 / RPM` for quota headroom; `0.0` disables pacing. These settings do not control tokens per minute. `[embedding].check_embedding_ctx_length = false` makes LangChain send raw text rather than OpenAI token arrays, improving compatibility at the cost of automatic input-length splitting.
+`[chat].request_delay_seconds`, `[embedding].request_delay_seconds`, and `[nvd].request_delay_seconds` are independent minimum intervals between synchronous outbound requests. Use slightly more than the provider window divided by its request allowance for quota headroom; `0.0` disables pacing. Chat and embedding SDK retries are paced; NVD currently has no retry loop. The active NVD request does not include an API key, so the tracked keyless example uses `6.1` seconds for the public five-requests-per-30-seconds allowance. These settings do not control tokens per minute. `[embedding].check_embedding_ctx_length = false` makes LangChain send raw text rather than OpenAI token arrays, improving compatibility at the cost of automatic input-length splitting.
 
 `validate_runtime_config()` parses the TOML and rejects missing tables, unknown settings, empty API keys, invalid URLs, and invalid numeric ranges before client construction. API-key dataclass fields use `repr=False`; never log or serialize the complete configuration object anyway.
 

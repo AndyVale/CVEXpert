@@ -68,6 +68,7 @@ def make_runtime_config():
         nvd=SimpleNamespace(
             base_url="https://nvd.example.test/cves/2.0?key=hidden",
             timeout_seconds=20.0,
+            request_delay_seconds=6.1,
         ),
         references=SimpleNamespace(max_pages=10),
         semantic_chunker=SimpleNamespace(
@@ -206,6 +207,8 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Runtime configuration", table)
         self.assertIn("classifier-model", table)
         self.assertIn("embedding-model", table)
+        self.assertIn("request delay (s)", table)
+        self.assertIn("6.1", table)
         self.assertIn("benchmark CVEs", table)
         self.assertIn("configured", table)
         self.assertNotIn("chat-secret", table)

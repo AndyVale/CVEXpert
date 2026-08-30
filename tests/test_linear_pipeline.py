@@ -46,6 +46,7 @@ def make_runtime_config(log_directory: str) -> RuntimeConfig:
         nvd=NvdSettings(
             base_url="https://nvd.example.test/cves/2.0",
             timeout_seconds=20.0,
+            request_delay_seconds=6.1,
         ),
         references=ReferenceSettings(max_pages=10),
         semantic_chunker=SemanticChunkerSettings(
@@ -244,12 +245,15 @@ class RunnerTests(unittest.TestCase):
         ]["request"][0]
         self.assertEqual(embedding_pacer.minimum_interval_seconds, 0.7)
         self.assertEqual(chat_pacer.minimum_interval_seconds, 4.2)
+        nvd_arguments = pipeline.steps[0].func.keywords
         self.assertEqual(
-            pipeline.steps[0].func.keywords,
-            {
-                "base_url": "https://nvd.example.test/cves/2.0",
-                "timeout_seconds": 20.0,
-            },
+            nvd_arguments["base_url"],
+            "https://nvd.example.test/cves/2.0",
+        )
+        self.assertEqual(nvd_arguments["timeout_seconds"], 20.0)
+        self.assertEqual(
+            nvd_arguments["request_pacer"].minimum_interval_seconds,
+            6.1,
         )
         self.assertEqual(pipeline.steps[1].func.keywords, {"max_pages": 10})
         self.assertEqual(

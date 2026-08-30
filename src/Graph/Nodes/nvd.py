@@ -1,4 +1,7 @@
+from collections.abc import Callable
+
 import requests
+
 from Graph.errors import PipelineStageError
 from Graph.reporting import get_logger
 from Graph.state import CVEClassifierState
@@ -43,11 +46,13 @@ def __nvd_resource_reorder(refs: list, weights: dict = None) -> list[str]:
 
     return [url for _, url in sorted(ranked_refs, key=lambda x: x[0])]
 
+
 def nvd_caller(
     state: CVEClassifierState,
     *,
     base_url: str,
     timeout_seconds: float,
+    request_pacer: Callable[[], None],
 ) -> CVEClassifierState:
     """
     Retrieves official CVE information from the National Vulnerability Database (NVD) API.
@@ -57,19 +62,23 @@ def nvd_caller(
     associated with the provided CVE ID using the NIST NVD REST API.
 
     Args:
-        state (CVEClassifierState): The current pipeline state containing 'cve_id'.
+        state: Current pipeline state containing `cve_id`.
+        base_url: Complete NVD CVE API URL.
+        timeout_seconds: Timeout for the NVD HTTP request.
+        request_pacer: Shared callback invoked before the HTTP attempt.
 
     Returns:
-        CVEClassifierState: The state updated with 'nvd_description' and 
-            'nvd_url_references' extracted from the API response.
+        The state updated with `nvd_description` and `nvd_url_references`.
+
     Raises:
-        requests.exceptions.HTTPError: If the NVD API request fails (status code != 200).
+        PipelineStageError: If pacing, the request, or response parsing fails.
     """
     cve_id = state["cve_id"]
     params = {"cveId": cve_id}
     LOGGER.debug("NVD retrieval started for %s", cve_id)
     
     try:
+        request_pacer()
         resp = requests.get(base_url, params=params, timeout=timeout_seconds)
         resp.raise_for_status()
         data = resp.json()

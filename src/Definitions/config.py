@@ -44,6 +44,7 @@ class NvdSettings:
 
     base_url: str
     timeout_seconds: float
+    request_delay_seconds: float
 
 
 @dataclass(frozen=True)
@@ -204,7 +205,11 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
             "check_embedding_ctx_length",
         },
     )
-    nvd_data = _require_table(data, "nvd", {"base_url", "timeout_seconds"})
+    nvd_data = _require_table(
+        data,
+        "nvd",
+        {"base_url", "timeout_seconds", "request_delay_seconds"},
+    )
     reference_data = _require_table(data, "references", {"max_pages"})
     chunker_data = _require_table(
         data,
@@ -253,6 +258,15 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
     nvd_timeout = _require_number(nvd_data, "nvd", "timeout_seconds")
     if nvd_timeout <= 0:
         raise _configuration_error("[nvd].timeout_seconds must be greater than zero")
+    nvd_request_delay = _require_number(
+        nvd_data,
+        "nvd",
+        "request_delay_seconds",
+    )
+    if not math.isfinite(nvd_request_delay) or nvd_request_delay < 0:
+        raise _configuration_error(
+            "[nvd].request_delay_seconds must be a finite number greater than or equal to zero"
+        )
 
     max_pages = _require_integer(reference_data, "references", "max_pages")
     if max_pages <= 0:
@@ -334,6 +348,7 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
                 "[nvd].base_url",
             ),
             timeout_seconds=nvd_timeout,
+            request_delay_seconds=nvd_request_delay,
         ),
         references=ReferenceSettings(max_pages=max_pages),
         semantic_chunker=SemanticChunkerSettings(

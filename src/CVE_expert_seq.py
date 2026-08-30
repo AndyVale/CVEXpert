@@ -293,6 +293,9 @@ def build_pipeline(runtime_config: RuntimeConfig):
         nvd_caller,
         base_url=runtime_config.nvd.base_url,
         timeout_seconds=runtime_config.nvd.timeout_seconds,
+        request_pacer=MinimumIntervalPacer(
+            runtime_config.nvd.request_delay_seconds
+        ),
     )
     configured_nvd_caller.__name__ = nvd_caller.__name__
     configured_scraper = partial(

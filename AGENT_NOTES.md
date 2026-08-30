@@ -12,7 +12,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
 - Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
-- Current phase: verbose tqdm-safe reporting is committed in `d435211`; the evaluation log-path simplification to `logs/RUN_<n>.json` is implemented locally and awaiting its separate review/commit.
+- Current phase: the `9f16957` snapshot includes verbose reporting and the simplified `logs/RUN_<n>.json` path; configurable NVD request pacing is implemented and verified as the next reliability unit.
 - Flat taxonomy, `CVE_TEST`, prompts, pipeline stage order, and artifact shape remain unchanged. Former hard-coded model/stage/evaluation values are now validated local TOML settings; the tracked template uses generic model placeholders while retaining the previous non-model pipeline parameters as examples.
 
 ## Durable user decisions
@@ -41,6 +41,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 20. Chat and embedding endpoints use separate configurable minimum request intervals. The chat interval is shared across summarizer and classifier calls; the embedding interval is shared across semantic chunking and filtering. This addresses RPM quotas but deliberately does not attempt token-per-minute accounting yet.
 21. Console verbosity is controlled by `-v`/`--verbose`, not TOML. Normal mode retains lifecycle messages and terminal errors but hides recoverable warnings; verbose mode adds those warnings, a safe configuration table, and stage summaries. Warnings remain recorded in `pipeline_warnings` and JSON regardless of console mode. Reporting uses standard logging plus `tqdm.write()` without a new dependency.
 22. Provider endpoint changes are outside the verbose-reporting unit. The user intends to use a separately hosted OpenAI-compatible embedding endpoint while retaining the current chat provider, but will configure those ignored local values separately.
+23. NVD calls use their own shared minimum-interval pacer. Because the active client does not send an NVD API key, the tracked and local default is `6.1` seconds, providing slight headroom over the keyless five-requests-per-30-seconds allowance. This pacing does not add retries or API-key support.
 
 ## Repository understanding
 
@@ -70,6 +71,7 @@ There is no acquisition, page, chunk, embedding, or summary cache. The default r
 - Entry point: `src/CVE_expert_seq.py`
 - Benchmark cases: 20
 - Evaluation runs: 1, sequential, stable `CVE_TEST` order
+- NVD request delay: `6.1` seconds in the tracked keyless example
 - Chat/classifier model: user-selected placeholder
 - Summarizer model: user-selected placeholder
 - Embedding model: user-selected placeholder
@@ -124,7 +126,7 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
 - Local observation on 2026-08-30: `uv 0.11.26`, Python `3.14.6`, the new 85-package lock resolves, the synchronized environment is consistent, and runtime imports succeed.
 - `config.toml` is resolved relative to the repository root and contains both endpoint API keys directly. `.env` is not read. API-key fields are hidden from dataclass representations, but the full configuration object must still be treated as sensitive.
-- The repository now has 54 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction and request pacing, tqdm-safe reporting, color/redaction behavior, CLI verbosity and failure handling, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
+- The repository now has 55 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction and request pacing, tqdm-safe reporting, color/redaction behavior, CLI verbosity and failure handling, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
 
 ## Documentation inconsistencies
 
@@ -133,7 +135,6 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 - `imgs/system.png` is stale: it omits explicit chunking, NVD reference ranking, embeddings, the benchmark runner, failure/degraded states, and evaluation metrics.
 - Scraper documentation says references are randomly shuffled, but the current function does not shuffle them; it processes NVD-ranked order.
 - Several stage docstrings call ordinary callable stages “LangGraph nodes” even though `main` uses LangChain sequencing.
-- Some NVD docstrings still mention raw HTTP errors even though the implementation now wraps request/parsing errors in `PipelineStageError`.
 
 ## Two-branch review
 
@@ -193,7 +194,7 @@ The old eight-run/160-NVD-request burst is resolved: the default now makes one s
 Remaining evidence:
 
 - A full benchmark still performs 20 fresh NVD requests and repeats page, embedding, summary, and classification work on every invocation.
-- There is no NVD API-key support, bounded retry/backoff, NVD/reference limiter, response cache, or persistent preprocessing artifact.
+- NVD calls are paced, but there is still no NVD API-key support, bounded retry/backoff, reference-origin limiter, response cache, or persistent preprocessing artifact.
 - Model endpoints now have configurable minimum request intervals, but no token-per-minute accounting, adaptive handling of quota headers, or persistent request/cost telemetry.
 
 Impact:
@@ -204,7 +205,7 @@ Impact:
 Approach:
 
 - Fetch and persist deterministic source/preprocessing artifacts once per CVE.
-- Add API-key-aware NVD headers, bounded retry/backoff, acquisition rate limiting, and explicit timeouts/content limits.
+- Add API-key-aware NVD headers and bounded retry/backoff while preserving pacing for every attempt; add explicit response/content limits.
 - Run any future stochastic or prompt comparison from the same pinned artifact stage.
 
 ### P1 — Semantic chunking is unusually aggressive
@@ -423,11 +424,11 @@ Approach:
 Do not start all of these at once. Keep each unit reviewable and measure behavior after each quality-affecting change.
 
 1. **Completed reliability foundation**
-   - Added an offline unit suite that currently has 42 tests covering evaluator/runner, TOML configuration, provider-neutral client construction and pacing, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
+   - Added an offline unit suite that currently has 55 tests covering evaluator/runner, TOML configuration, provider-neutral client construction and pacing, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
    - Defined terminal error and degraded-warning semantics, fail-fast mode-aware configuration, classifier invariants, deterministic single-run behavior, coverage reporting, and correct cosine normalization.
    - Still needed from the original contract work: a versioned artifact manifest and controlled integration fixtures.
 2. **Reliable acquisition and artifacts — recommended next**
-   - Add NVD key support, bounded retry/backoff, acquisition rate limiting, English-description selection, richer structured fields, caching, and provenance.
+   - NVD minimum-interval pacing is complete. Add NVD key support, bounded retry/backoff, English-description selection, richer structured fields, caching, and provenance.
    - Add safe bounded scraping with content-type/size validation.
    - Define versioned resume artifacts before optimizing prompts/retrieval against mutable live inputs.
 3. **Reusable pipeline and benchmark split**
@@ -450,7 +451,7 @@ Do not start all of these at once. Keep each unit reviewable and measure behavio
 
 These are proposals, not authorization to edit production code:
 
-1. NVD client hardening: English description selection, API-key support, explicit retryable statuses, bounded exponential backoff, and shared rate limiting.
+1. NVD client hardening: English description selection, API-key support, explicit retryable statuses, and bounded exponential backoff integrated with the existing shared pacer.
 2. Versioned stage-artifact schema plus a parameterized loader for named resume stages.
 3. Bounded scraper policy for URL scheme, response/content type, downloaded size, and per-origin coordination.
 4. Cached retrieval-quality harness to recalibrate cosine threshold and compare chunk/query/top-k choices without live-source drift.
@@ -459,7 +460,7 @@ These are proposals, not authorization to edit production code:
 ## Open questions for future work
 
 - What public interface should the reusable classifier expose first: Python API, CLI, or both?
-- Is an NVD API key available for development/production, and what request-rate policy should be enforced?
+- Is an NVD API key available for development/production? If added, replace the keyless `6.1`-second default with an explicitly reviewed keyed rate policy.
 - What token accounting, adaptive quota handling, and cost telemetry should supplement the configured model-request intervals?
 - Which stages and fields must version 1 of the replay artifact support?
 - Should cached source pages be stored in repository-external artifacts, logs, or a dedicated cache directory?
@@ -530,10 +531,17 @@ These are proposals, not authorization to edit production code:
 - The one-CVE run verified the safe table, stage summaries, tqdm-safe yellow warnings, a red terminal error, and a final `successful=0 degraded=0 failed=1` summary without a traceback. The unchanged local embedding configuration still produced recoverable semantic-chunker HTTP 400 batch-limit errors and HTTP 429 quota errors, followed by a terminal HTTP 429 filter failure. The ignored old-path `RUN_0.json` was rewritten as authorized.
 - No configuration values or log paths were changed in this reporting unit. Its complete diff, offline verification, and authorized one-CVE live output were shown before commit.
 
-### 2026-08-30 — Simplified evaluation log path (pending separate commit)
+### 2026-08-30 — Simplified evaluation log path (`9f16957` snapshot)
 
 - Changed the tracked template and ignored local configuration from `logs/LOG_GPT_NORANDAware` to `logs`, so run 0 resolves to `logs/RUN_0.json`.
 - Updated user and agent documentation to match. Existing ignored files under `logs/LOG_GPT_NORANDAware/` are intentionally untouched and remain recoverable.
+
+### 2026-08-30 — NVD request pacing
+
+- Added validated `[nvd].request_delay_seconds` configuration and one shared `MinimumIntervalPacer` instance across all CVE lookups in a benchmark run.
+- The pacer runs immediately before every NVD HTTP attempt. The first request remains immediate; later request starts are separated by the configured minimum interval even when the previous request failed.
+- The tracked and ignored local configurations use `6.1` seconds for the current keyless NVD client. API-key headers, retry/backoff, and caching remain separate future work.
+- All 55 offline tests, compilation, lock consistency, installed dependency consistency, whitespace checks, local configuration validation, and a secret-oriented scan passed. No NVD, reference, embedding, or chat request was made during verification.
 
 ## Notes maintenance checklist
 
