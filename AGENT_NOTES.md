@@ -12,8 +12,8 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
 - Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
-- Current phase: the `9f16957` snapshot includes verbose reporting and the simplified `logs/RUN_<n>.json` path; configurable NVD request pacing is implemented and verified as the next reliability unit.
-- Flat taxonomy, `CVE_TEST`, prompts, pipeline stage order, and artifact shape remain unchanged. Former hard-coded model/stage/evaluation values are now validated local TOML settings; the tracked template uses generic model placeholders while retaining the previous non-model pipeline parameters as examples.
+- Current phase: configurable NVD request pacing is committed in `67f0641`; the 20-case `CVE_TEST` annotation audit is implemented and verified locally.
+- The flat taxonomy itself, prompts, pipeline stage order, and artifact shape remain unchanged. `CVE_TEST` values and evidence comments have been re-audited; former hard-coded model/stage/evaluation values are validated local TOML settings.
 
 ## Durable user decisions
 
@@ -26,7 +26,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
    - a separate, repeatable benchmark/evaluation harness.
 6. The active linear taxonomy is flat: `CVE_TEST` refers to `LABELS_DESCRIPTIONS`. `VULNERABILITY_TREE` belongs to the graph experiment and is ignored by the active linear pipeline.
 7. Preserve the option to support either flat or hierarchical taxonomies in the future, but keep the current flat behavior that matches the linear benchmark.
-8. Intended flat-label semantics are evidence-backed multi-label classification: return each supported mechanism directly supported by evidence, and make `NONE` mutually exclusive. The existing fixture has not yet been re-audited against this intent.
+8. Intended flat-label semantics are evidence-backed multi-label classification: return every matching mechanism directly supported by evidence, and make `NONE` mutually exclusive. RCE alone is not CodeInjection, unauthenticated reach alone is not AccessControl, and a downstream impact or companion CVE's mechanism is not attributed to the CVE being classified.
 9. Chat and embedding clients use independently configurable complete OpenAI-compatible base URLs, model identifiers, and credential-variable names. They may share a URL or credential when appropriate. Embedding credential validation can be avoided when resuming from a JSON artifact that already contains a later-stage result such as filtered chunks.
 10. Future replay should resume from explicit named stages (for example, filtered chunks, summaries, or classification context), using a versioned artifact rather than a hard-coded one-off loader.
 11. Operational/model failure is not a classification. `NONE` is valid only after a successful, validated classifier response.
@@ -42,6 +42,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 21. Console verbosity is controlled by `-v`/`--verbose`, not TOML. Normal mode retains lifecycle messages and terminal errors but hides recoverable warnings; verbose mode adds those warnings, a safe configuration table, and stage summaries. Warnings remain recorded in `pipeline_warnings` and JSON regardless of console mode. Reporting uses standard logging plus `tqdm.write()` without a new dependency.
 22. Provider endpoint changes are outside the verbose-reporting unit. The user intends to use a separately hosted OpenAI-compatible embedding endpoint while retaining the current chat provider, but will configure those ignored local values separately.
 23. NVD calls use their own shared minimum-interval pacer. Because the active client does not send an NVD API key, the tracked and local default is `6.1` seconds, providing slight headroom over the keyless five-requests-per-30-seconds allowance. This pacing does not add retries or API-key support.
+24. `CVE_TEST` dictionary values are authoritative benchmark annotations; nearby comments must agree with and only explain those values. Interpret the active `LABELS_DESCRIPTIONS` values rather than historical comments when auditing the fixture.
 
 ## Repository understanding
 
@@ -319,11 +320,10 @@ Approach:
 
 Observed benchmark facts:
 
-- 20 CVEs, all with at least one non-`NONE` expected label.
-- `InputValidation` appears in 17/20 cases and `AccessControl` in 11/20.
-- `SQLi`, `CSRF`, and `ResourceExhaustion` have zero expected examples.
+- 20 CVEs, including one mutually exclusive `NONE` case.
+- `InputValidation` appears in 13/20 cases and `AccessControl` in 6/20.
+- `XSS`, `SQLi`, and `CSRF` have zero expected examples; `SSRF`, `OutOfBoundsRead`, `UseAfterFree`, `InfoLeak`, and `ResourceExhaustion` have one each.
 - Several labels have only one example.
-- The `CVE-2025-59145` comment says the taxonomy does not cover the supply-chain compromise and that `NONE` is appropriate, but the expected labels are `CodeInjection` and `XSS`.
 - Many examples are famous CVEs likely known to general-purpose models, so CVE-ID memorization can mask retrieval quality.
 
 Impact:
@@ -334,7 +334,7 @@ Impact:
 
 Approach:
 
-- First document and re-audit annotation rules against `LABELS_DESCRIPTIONS` without silently changing expected labels.
+- Preserve the documented annotation rules and re-check assignments when authoritative CVE records materially change.
 - Add negative/unsupported cases and balanced coverage for every label.
 - Track per-label precision/recall/F1, exact match, sample-F1, Hamming loss, coverage, latency, and cost.
 - Separate development and held-out cases; include newer/less-famous CVEs and optionally mask the CVE ID in retrieval ablations.
@@ -542,6 +542,14 @@ These are proposals, not authorization to edit production code:
 - The pacer runs immediately before every NVD HTTP attempt. The first request remains immediate; later request starts are separated by the configured minimum interval even when the previous request failed.
 - The tracked and ignored local configurations use `6.1` seconds for the current keyless NVD client. API-key headers, retry/backoff, and caching remain separate future work.
 - All 55 offline tests, compilation, lock consistency, installed dependency consistency, whitespace checks, local configuration validation, and a secret-oriented scan passed. No NVD, reference, embedding, or chat request was made during verification.
+
+### 2026-08-30 — `CVE_TEST` label audit
+
+- Researched all 20 fixtures against the current NVD records plus vendor advisories and primary technical analyses. Treated the `CVE_TEST` values as ground truth and rewrote every evidence comment so it agrees with the value.
+- Applied the flat-taxonomy rule that every directly supported matching label is included, while consequences and exploit preconditions do not manufacture mechanisms: RCE alone is not CodeInjection, unauthenticated reach alone is not AccessControl, and companion CVEs are classified separately.
+- Changed 13 fixtures. Notable corrections include `CVE-2025-59145` to `NONE`, Log4Shell gaining the Apache CNA's CWE-400/ResourceExhaustion classification, Heartbleed losing the logical InfoLeak label, FortiWeb losing CommandInjection, ProxyShell losing UntrustedDeserialization, ProxyLogon retaining only UntrustedDeserialization, and IngressNightmare retaining only AccessControl.
+- The resulting fixture has 40 assignments across 20 cases: 13 InputValidation, 6 AccessControl, 4 each CodeInjection and UntrustedDeserialization, 3 PathTraversal, 2 each CommandInjection and BufferOverflow, one each SSRF, OutOfBoundsRead, UseAfterFree, InfoLeak, ResourceExhaustion, and NONE, and zero XSS, SQLi, or CSRF examples.
+- Added fixture-invariant tests for nonempty, unique, allowed labels and mutually exclusive `NONE`. All 57 offline tests, Python compilation, lock consistency, installed dependency consistency, and whitespace checks passed.
 
 ## Notes maintenance checklist
 
