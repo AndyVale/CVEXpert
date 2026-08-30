@@ -1,10 +1,10 @@
 # Copy this file to config.toml and adjust it for your deployment.
-# API keys are read from the environment variables named below; never put their
-# values in this file.
+# This tracked example contains placeholders only. Put real API keys in the
+# ignored config.toml created from this file.
 
 [chat]
 base_url = "http://localhost:8000/v1"
-api_key_env = "CVEXPERT_CHAT_API_KEY"
+api_key = "replace-with-chat-api-key"
 classifier_model = "your-classifier-model"
 classifier_temperature = 0.0
 summarizer_model = "your-summarizer-model"
@@ -12,7 +12,7 @@ summarizer_temperature = 0.0
 
 [embedding]
 base_url = "http://localhost:8001/v1"
-api_key_env = "CVEXPERT_EMBEDDING_API_KEY"
+api_key = "replace-with-embedding-api-key"
 model = "your-embedding-model"
 
 [nvd]

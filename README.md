@@ -26,18 +26,11 @@ Copy the tracked template to the ignored local configuration file:
 cp config.example.toml config.toml
 ```
 
-`config.toml` contains only non-secret settings: complete endpoint URLs, model identifiers, stage parameters, and the evaluation output location. The application passes each `base_url` through unchanged, so it can point to any compatible remote service or local server.
+`config.toml` contains complete endpoint URLs, API keys, model identifiers, stage parameters, and the evaluation output location. The application passes each `base_url` through unchanged, so it can point to any compatible remote service or local server. No `.env` file is required.
 
-The `[chat].api_key_env` and `[embedding].api_key_env` settings name environment variables; they do not contain credentials. Define those variables in the ignored repository-root `.env` file. With the names from the template:
+Replace the `[chat].api_key` and `[embedding].api_key` placeholders in your local copy. The two values may be identical when one credential serves both endpoints. The real `config.toml` and local variants such as `config.production.toml` are ignored by Git; only `config.example.toml`, which must contain placeholders rather than real credentials, is tracked. Never force-add a real configuration file.
 
-```dotenv
-CVEXPERT_CHAT_API_KEY=replace-with-your-chat-key
-CVEXPERT_EMBEDDING_API_KEY=replace-with-your-embedding-key
-```
-
-The two TOML settings may name the same environment variable when one credential serves both endpoints. Never store an API key in either TOML file.
-
-The loader rejects missing tables, unknown settings, invalid URLs and ranges, and missing credential-variable names before constructing clients. It reports variable names without revealing their values.
+The loader rejects missing tables, unknown settings, empty API keys, and invalid URLs or ranges before constructing clients. Secret fields are excluded from the configuration object's representation to reduce accidental logging.
 
 ## Run
 

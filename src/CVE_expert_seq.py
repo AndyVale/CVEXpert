@@ -12,7 +12,7 @@ import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 
 from Definitions.const import CVE_TEST
-from Definitions.config import RuntimeConfig, read_api_key, validate_runtime_config
+from Definitions.config import RuntimeConfig, validate_runtime_config
 from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
 
 from Graph.Nodes.nvd import nvd_caller
@@ -174,15 +174,12 @@ def run_evaluation(
 def build_pipeline(runtime_config: RuntimeConfig):
     """Construct the configured live linear pipeline after validation."""
 
-    chat_api_key = read_api_key(runtime_config.chat.api_key_env)
-    embedding_api_key = read_api_key(runtime_config.embedding.api_key_env)
-
     print(f"Chat Host: {runtime_config.chat.base_url}")
     print(f"Embedding Host: {runtime_config.embedding.base_url}")
 
     embedding_model_instance = OpenAIEmbeddings(
         model=runtime_config.embedding.model,
-        api_key=embedding_api_key,
+        api_key=runtime_config.embedding.api_key,
         base_url=runtime_config.embedding.base_url,
     )
 
@@ -205,7 +202,7 @@ def build_pipeline(runtime_config: RuntimeConfig):
     summarizer_llm = init_chat_model(
         model=runtime_config.chat.summarizer_model,
         model_provider="openai",
-        api_key=chat_api_key,
+        api_key=runtime_config.chat.api_key,
         base_url=runtime_config.chat.base_url,
         temperature=runtime_config.chat.summarizer_temperature,
     )
@@ -218,7 +215,7 @@ def build_pipeline(runtime_config: RuntimeConfig):
     classifier_llm = init_chat_model(
         model=runtime_config.chat.classifier_model,
         model_provider="openai",
-        api_key=chat_api_key,
+        api_key=runtime_config.chat.api_key,
         base_url=runtime_config.chat.base_url,
         temperature=runtime_config.chat.classifier_temperature,
     )
@@ -266,7 +263,7 @@ def build_pipeline(runtime_config: RuntimeConfig):
 def main():
     """Build the live pipeline and run the benchmark exactly once."""
 
-    runtime_config = validate_runtime_config(require_embedding=True)
+    runtime_config = validate_runtime_config()
     pipeline, pipeline_component_names = build_pipeline(runtime_config)
     return run_evaluation(pipeline, pipeline_component_names, runtime_config)
 

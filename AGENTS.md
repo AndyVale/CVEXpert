@@ -17,10 +17,10 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `README.md`: user-facing setup, configuration, execution, architecture, and verification guidance.
 - `pyproject.toml`: authoritative project metadata, Python range, and direct dependencies. The project is deliberately non-packaged (`tool.uv.package = false`) while its entry points remain scripts.
 - `uv.lock`: committed complete dependency resolution. `requirements.txt` has been removed.
-- `config.example.toml`: tracked, provider-neutral template for every supported non-secret runtime setting.
-- `config.toml`: ignored local runtime configuration copied from the template. Never commit it.
+- `config.example.toml`: the only tracked configuration file; a provider-neutral template with credential placeholders.
+- `config.toml` and `config.*.toml`: ignored local runtime configurations copied from the template. They contain real endpoint credentials and must never be committed; `.gitignore` explicitly re-allows only `config.example.toml`.
 - `src/CVE_expert_seq.py`: active entry point and benchmark runner for the full live linear pipeline.
-- `src/Definitions/config.py`: typed TOML settings, strict validation, repository-root path resolution, `.env` loading, and secret lookup by environment-variable name.
+- `src/Definitions/config.py`: typed TOML settings, strict validation, repository-root path resolution, and secret-safe object representations.
 - `src/Definitions/const.py`: the 20-CVE hand-labeled benchmark fixture.
 - `src/Definitions/labels.py`: flat label definitions plus an unused-on-main hierarchical tree.
 - `src/Graph/state.py`: shared `CVEClassifierState` `TypedDict`.
@@ -29,7 +29,6 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `tests/`: standard-library `unittest` regression suite. Tests use fakes and must remain offline.
 - `imgs/system.png`: an older high-level architecture diagram that omits some current stages.
 - `logs/`: ignored runtime artifacts; full runs rewrite one JSON file per evaluation after every CVE.
-- `.env`: ignored local credentials only. Endpoint URLs, models, and pipeline settings belong in `config.toml`. Never print, commit, or paste credential values.
 
 ## Active linear pipeline
 
@@ -89,7 +88,7 @@ source .venv/bin/activate
 python src/CVE_expert_seq.py
 ```
 
-Run project commands from the repository root. `config.py` resolves `config.toml` and `.env` from that root even if the launch directory differs. Source imports still rely on `src` being placed on `sys.path` by running a file under `src/` or setting `PYTHONPATH=src` for module-based checks.
+Run project commands from the repository root. `config.py` resolves `config.toml` from that root even if the launch directory differs. Source imports still rely on `src` being placed on `sys.path` by running a file under `src/` or setting `PYTHONPATH=src` for module-based checks.
 
 `pyproject.toml` is the sole dependency declaration and lists every package imported directly by the active code. `uv.lock` pins transitive dependencies. Use `uv add`, `uv remove`, and `uv lock` for reviewed dependency changes, and commit the metadata and lockfile together. Do not recreate `requirements.txt`.
 
@@ -105,18 +104,9 @@ Copy the tracked template before the first run:
 cp config.example.toml config.toml
 ```
 
-`config.toml` is ignored and stores only non-secret settings. Its supported tables are `[chat]`, `[embedding]`, `[nvd]`, `[references]`, `[semantic_chunker]`, `[cosine_filter]`, and `[evaluation]`. Complete chat and embedding `base_url` values are passed through unchanged; do not rely on implicit scheme or `/v1` manipulation. The configuration is provider-neutral within the OpenAI-compatible API contract.
+`config.toml` stores the complete local configuration, including real `[chat].api_key` and `[embedding].api_key` values. Its supported tables are `[chat]`, `[embedding]`, `[nvd]`, `[references]`, `[semantic_chunker]`, `[cosine_filter]`, and `[evaluation]`. Complete chat and embedding `base_url` values are passed through unchanged; do not rely on implicit scheme or `/v1` manipulation. The configuration is provider-neutral within the OpenAI-compatible API contract. No `.env` file is loaded or required.
 
-The `api_key_env` settings identify the names of credential variables. With the tracked template, `.env` would contain:
-
-```dotenv
-CVEXPERT_CHAT_API_KEY=...
-CVEXPERT_EMBEDDING_API_KEY=...
-```
-
-The variable names are user-selectable and may be identical when one credential serves both endpoints. Never place credential values in `config.toml` or `config.example.toml`.
-
-`validate_runtime_config(require_embedding=True)` parses the TOML, rejects missing/unknown/invalid settings, loads repository-root `.env`, and checks the named chat and embedding credentials before client construction. The loader also supports `require_embedding=False` for a future resume workflow that starts after embedding, but no replay entry point currently exists. `RuntimeConfigurationError` reports missing variable names without their values.
+`validate_runtime_config()` parses the TOML and rejects missing tables, unknown settings, empty API keys, invalid URLs, and invalid numeric ranges before client construction. API-key dataclass fields use `repr=False`; never log or serialize the complete configuration object anyway.
 
 Do not log credentials. When diagnosing configuration, report only whether each required setting is present, never its value.
 
@@ -147,7 +137,7 @@ Run live NVD, scraping, embedding, or LLM workflows only when the user explicitl
 - Avoid hard-coded absolute paths, run names, endpoint details, and concurrency values in new code.
 - Do not use wildcard imports in new code. Add explicit types and stage-level validation when touching relevant code.
 - Every commit should leave the offline `unittest` suite passing. Add regression coverage before or with a behavior fix.
-- Never commit `.env`, `config.toml`, runtime logs, model caches, downloaded weights, or credentials.
+- Never commit `.env`, `config.toml`, any real `config.*.toml`, runtime logs, model caches, downloaded weights, or credentials. Only the placeholder-only `config.example.toml` belongs in Git.
 - Do not modify or delete existing user logs or local artifacts unless requested.
 - Keep `AGENT_NOTES.md` current as work progresses.
 

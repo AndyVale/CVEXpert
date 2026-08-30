@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-import os
+from dataclasses import dataclass, field
 from pathlib import Path
 import tomllib
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = REPOSITORY_ROOT / "config.toml"
 CONFIG_EXAMPLE_PATH = REPOSITORY_ROOT / "config.example.toml"
-DOTENV_PATH = REPOSITORY_ROOT / ".env"
 
 
 @dataclass(frozen=True)
@@ -23,7 +18,7 @@ class ChatSettings:
     """Shared OpenAI-compatible chat endpoint and stage-specific models."""
 
     base_url: str
-    api_key_env: str
+    api_key: str = field(repr=False)
     classifier_model: str
     classifier_temperature: float
     summarizer_model: str
@@ -35,7 +30,7 @@ class EmbeddingSettings:
     """OpenAI-compatible embedding endpoint configuration."""
 
     base_url: str
-    api_key_env: str
+    api_key: str = field(repr=False)
     model: str
 
 
@@ -84,7 +79,7 @@ class EvaluationSettings:
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    """Complete non-secret configuration for one pipeline run."""
+    """Complete configuration for one pipeline run."""
 
     chat: ChatSettings
     embedding: EmbeddingSettings
@@ -104,16 +99,7 @@ class RuntimeConfig:
 
 
 class RuntimeConfigurationError(ValueError):
-    """Raised when TOML settings or referenced secrets are unavailable."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        missing_variables: tuple[str, ...] = (),
-    ):
-        self.missing_variables = missing_variables
-        super().__init__(message)
+    """Raised when the local TOML configuration is unavailable or invalid."""
 
 
 def _configuration_error(message: str) -> RuntimeConfigurationError:
@@ -188,7 +174,7 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
         "chat",
         {
             "base_url",
-            "api_key_env",
+            "api_key",
             "classifier_model",
             "classifier_temperature",
             "summarizer_model",
@@ -198,7 +184,7 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
     embedding_data = _require_table(
         data,
         "embedding",
-        {"base_url", "api_key_env", "model"},
+        {"base_url", "api_key", "model"},
     )
     nvd_data = _require_table(data, "nvd", {"base_url", "timeout_seconds"})
     reference_data = _require_table(data, "references", {"max_pages"})
@@ -276,7 +262,7 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
                 _require_string(chat_data, "chat", "base_url"),
                 "[chat].base_url",
             ),
-            api_key_env=_require_string(chat_data, "chat", "api_key_env"),
+            api_key=_require_string(chat_data, "chat", "api_key"),
             classifier_model=_require_string(
                 chat_data,
                 "chat",
@@ -295,11 +281,7 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
                 _require_string(embedding_data, "embedding", "base_url"),
                 "[embedding].base_url",
             ),
-            api_key_env=_require_string(
-                embedding_data,
-                "embedding",
-                "api_key_env",
-            ),
+            api_key=_require_string(embedding_data, "embedding", "api_key"),
             model=_require_string(embedding_data, "embedding", "model"),
         ),
         nvd=NvdSettings(
@@ -329,35 +311,10 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
     )
 
 
-def _validate_secret_environment(
-    config: RuntimeConfig,
-    *,
-    require_embedding: bool,
-    environ: Mapping[str, str],
-) -> None:
-    required_variables = [config.chat.api_key_env]
-    if require_embedding:
-        required_variables.append(config.embedding.api_key_env)
-
-    missing_variables = tuple(
-        variable_name
-        for variable_name in dict.fromkeys(required_variables)
-        if not environ.get(variable_name, "").strip()
-    )
-    if missing_variables:
-        raise RuntimeConfigurationError(
-            "Missing required environment variables: " + ", ".join(missing_variables),
-            missing_variables=missing_variables,
-        )
-
-
 def load_runtime_config(
     config_path: str | Path | None = None,
-    *,
-    require_embedding: bool = True,
-    environ: Mapping[str, str] | None = None,
 ) -> RuntimeConfig:
-    """Load TOML configuration and validate its referenced secret variables."""
+    """Load and validate the ignored local TOML configuration."""
 
     path = Path(config_path) if config_path is not None else CONFIG_PATH
     if not path.is_file():
@@ -372,49 +329,12 @@ def load_runtime_config(
             f"Invalid TOML in configuration file {path}: {error}"
         ) from error
 
-    config = _parse_runtime_config(data)
-
-    if environ is None:
-        load_dotenv(dotenv_path=DOTENV_PATH, override=False)
-        environment: Mapping[str, str] = os.environ
-    else:
-        environment = environ
-
-    _validate_secret_environment(
-        config,
-        require_embedding=require_embedding,
-        environ=environment,
-    )
-    return config
-
-
-def read_api_key(
-    variable_name: str,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> str:
-    """Read one already-validated secret without placing it in TOML or logs."""
-
-    environment = os.environ if environ is None else environ
-    value = environment.get(variable_name, "")
-    if not value.strip():
-        raise RuntimeConfigurationError(
-            f"Missing required environment variables: {variable_name}",
-            missing_variables=(variable_name,),
-        )
-    return value
+    return _parse_runtime_config(data)
 
 
 def validate_runtime_config(
-    require_embedding: bool = True,
     config_path: str | Path | None = None,
-    *,
-    environ: Mapping[str, str] | None = None,
 ) -> RuntimeConfig:
     """Compatibility wrapper returning the validated runtime configuration."""
 
-    return load_runtime_config(
-        config_path,
-        require_embedding=require_embedding,
-        environ=environ,
-    )
+    return load_runtime_config(config_path)

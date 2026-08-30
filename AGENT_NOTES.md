@@ -6,12 +6,12 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 
 - Last updated: 2026-08-30 (Europe/Rome)
 - Active branch: `main`
-- Linear code snapshot implemented through: `d175957` (`build: manage dependencies with uv project metadata`)
+- Linear code snapshot includes the direct-TOML credential migration documented in the 2026-08-30 work log below.
 - Graph branch snapshot reviewed for comparison: `graphCVExpert` at `411baf6`
 - Documentation commit completed: `c95e0f0` (`docs: add repository guidance for coding agents`)
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
-- Current phase: provider-neutral TOML configuration and uv project metadata are implemented; document and verify the migration, then return to the next measured P1 quality or acquisition unit.
+- Current phase: provider-neutral local TOML configuration and uv project metadata are implemented and verified; return to the next measured P1 quality or acquisition unit.
 - Flat taxonomy, `CVE_TEST`, prompts, pipeline stage order, and artifact shape remain unchanged. Former hard-coded model/stage/evaluation values are now validated local TOML settings; the tracked template uses generic model placeholders while retaining the previous non-model pipeline parameters as examples.
 
 ## Durable user decisions
@@ -32,8 +32,8 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 12. Individual reference scrape, chunk, and summary failures are recoverable and make a result `degraded`; NVD, filtering, formatter-precondition, and classifier failures are terminal for that CVE.
 13. The old eight-run benchmark did not calculate an average. It has been replaced with one insertion-order run. The tracked TOML template keeps temperature `0.0` for summarizer and classifier, though local configuration can override it; provider/runtime behavior may still vary.
 14. Partial-run metrics exclude terminal errors but must report coverage and `complete: false`; degraded classifications remain scored.
-15. `config.toml` is local and ignored. `config.example.toml` is the tracked, provider-neutral schema example. Neither TOML file may contain credential values; TOML names environment variables whose values are loaded from ignored `.env`.
-16. Runtime configuration must not encode assumptions about a particular provider. Complete URLs and arbitrary model/key-variable names are accepted under the OpenAI-compatible client contract.
+15. `config.toml` is local and ignored and now contains real API keys directly; no `.env` file is required. `config.*.toml` variants are also ignored, while `.gitignore` explicitly re-allows only the tracked, placeholder-only `config.example.toml`.
+16. Runtime configuration must not encode assumptions about a particular provider. Complete URLs, arbitrary model identifiers, and arbitrary API-key values are accepted under the OpenAI-compatible client contract.
 17. `pyproject.toml` is the sole direct dependency declaration, `uv.lock` is committed, and `requirements.txt` has been removed.
 18. The declared Python baseline is `>=3.12`. The project remains deliberately non-packaged until a separate source-layout/CLI refactor is justified.
 19. The obsolete `src/test.py` replay experiment has been removed. Preserve `StateFromFileLoader` as a tested utility, but add any future replay feature as an explicit, versioned resume-stage interface rather than another manually configured script.
@@ -119,12 +119,12 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 - `uv.lock` contains `langgraph` transitively because current `langchain` depends on it; active CVExpert code still does not import or use LangGraph.
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
 - Local observation on 2026-08-30: `uv 0.11.26`, Python `3.14.6`, the new 85-package lock resolves, the synchronized environment is consistent, and runtime imports succeed.
-- `config.toml` and `.env` are resolved relative to the repository root. Live validation requires the chat and embedding credential variables named by TOML; a future post-embedding resume workflow can call validation with `require_embedding=False`. Missing-setting errors contain names only.
-- The repository now has 38 offline standard-library `unittest` cases covering typed TOML parsing/validation, provider-neutral client construction, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
+- `config.toml` is resolved relative to the repository root and contains both endpoint API keys directly. `.env` is not read. API-key fields are hidden from dataclass representations, but the full configuration object must still be treated as sensitive.
+- The repository now has 37 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
 
 ## Documentation inconsistencies
 
-- The README now documents uv setup, provider-neutral TOML/environment configuration, the live entry point, pipeline, output, and offline verification. It remains intentionally concise rather than a full architecture specification.
+- The README now documents uv setup, provider-neutral local TOML configuration, the live entry point, pipeline, output, and offline verification. It remains intentionally concise rather than a full architecture specification.
 - The current README no longer embeds `imgs/system.png`; an earlier revision did.
 - `imgs/system.png` is stale: it omits explicit chunking, NVD reference ranking, embeddings, the benchmark runner, failure/degraded states, and evaluation metrics.
 - Scraper documentation says references are randomly shuffled, but the current function does not shuffle them; it processes NVD-ranked order.
@@ -176,7 +176,7 @@ Implemented in the first reliability batch:
 - Operational/model failures no longer become ordinary `NONE` predictions. Terminal stages raise `PipelineStageError`; reference-local failures become warnings and degraded results.
 - Classifier output validation enforces allowed, non-empty, unique labels and mutual exclusion for `NONE`.
 - Per-CVE logs expose success/degraded/error state, warnings, and structured error details. Aggregate output exposes coverage and cannot mark a partial run complete.
-- `.env` discovery is repository-root anchored and mode-aware validation occurs before live client construction.
+- Local TOML discovery is repository-root anchored and validation occurs before live client construction. Direct API-key fields superseded the earlier `.env`-based implementation.
 - Query and document embeddings are L2-normalized. Zero document vectors score zero; zero query vectors, non-finite data, count mismatches, and dimension mismatches fail explicitly.
 - Regression tests use deliberately unnormalized embeddings and model/NVD failures to pin these behaviors.
 
@@ -404,7 +404,7 @@ Evidence:
 - Prompts are embedded in large classes, making versioning and prompt-only tests difficult.
 - The entry points use wildcard evaluator imports.
 - Broad exceptions obscure expected failure modes.
-- The 38-case offline unit regression suite covers the reliability and configuration migrations, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
+- The 37-case offline unit regression suite covers the reliability and configuration migrations, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
 - Dependencies are now declared and reproducibly locked. The remaining structural issues are module layout, prompt isolation, experiment cleanup, and CI/integration coverage.
 
 Approach:
@@ -419,7 +419,7 @@ Approach:
 Do not start all of these at once. Keep each unit reviewable and measure behavior after each quality-affecting change.
 
 1. **Completed reliability foundation**
-   - Added an offline unit suite that has grown to 38 tests covering evaluator/runner, TOML configuration, provider-neutral client construction, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
+   - Added an offline unit suite that currently has 37 tests covering evaluator/runner, TOML configuration, provider-neutral client construction, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
    - Defined terminal error and degraded-warning semantics, fail-fast mode-aware configuration, classifier invariants, deterministic single-run behavior, coverage reporting, and correct cosine normalization.
    - Still needed from the original contract work: a versioned artifact manifest and controlled integration fixtures.
 2. **Reliable acquisition and artifacts — recommended next**
@@ -500,6 +500,13 @@ These are proposals, not authorization to edit production code:
 - Removed the obsolete `src/test.py` replay experiment and its machine-specific path while retaining the tested `StateFromFileLoader` utility for future versioned resume work.
 - Expanded and updated README/agent guidance for `uv sync`, local TOML creation, arbitrary OpenAI-compatible endpoints, credential-variable indirection, and safe offline verification.
 - Synchronized the lock into `.venv`; all 38 offline tests, compilation, `uv lock --check`, `uv pip check`, and whitespace checks passed. No NVD, web scraping, embedding, or chat/model request was made.
+
+### 2026-08-30 — Direct TOML credentials
+
+- Superseded the environment-variable indirection from `c41ddde` at the user's request: `[chat].api_key` and `[embedding].api_key` are now read directly from ignored `config.toml`; `.env` is no longer loaded or required.
+- Marked secret dataclass fields with `repr=False`, added empty-key and representation regression tests, and kept `config.example.toml` limited to obvious placeholders.
+- Expanded `.gitignore` to cover `config.toml` and `config.*.toml` while explicitly re-allowing `config.example.toml`.
+- Removed the direct `python-dotenv` dependency; it may remain in `uv.lock` transitively through third-party packages.
 
 ## Notes maintenance checklist
 

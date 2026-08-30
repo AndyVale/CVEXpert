@@ -27,7 +27,7 @@ def make_runtime_config(log_directory: str) -> RuntimeConfig:
     return RuntimeConfig(
         chat=ChatSettings(
             base_url="https://chat.example.test/v1",
-            api_key_env="CHAT_SECRET",
+            api_key="chat-token",
             classifier_model="classifier-model",
             classifier_temperature=0.0,
             summarizer_model="summarizer-model",
@@ -35,7 +35,7 @@ def make_runtime_config(log_directory: str) -> RuntimeConfig:
         ),
         embedding=EmbeddingSettings(
             base_url="https://embedding.example.test/v1",
-            api_key_env="EMBEDDING_SECRET",
+            api_key="embedding-token",
             model="embedding-model",
         ),
         nvd=NvdSettings(
@@ -181,18 +181,7 @@ class RunnerTests(unittest.TestCase):
         embeddings_client = FakeEmbeddingsClient()
         chat_client = FakeChatClient()
 
-        def secret_for(variable_name):
-            return {
-                "CHAT_SECRET": "chat-token",
-                "EMBEDDING_SECRET": "embedding-token",
-            }[variable_name]
-
         with (
-            patch.object(
-                CVE_expert_seq,
-                "read_api_key",
-                side_effect=secret_for,
-            ) as read_secret,
             patch.object(
                 CVE_expert_seq,
                 "OpenAIEmbeddings",
@@ -206,10 +195,6 @@ class RunnerTests(unittest.TestCase):
         ):
             pipeline, component_names = CVE_expert_seq.build_pipeline(runtime_config)
 
-        self.assertEqual(
-            [call.args[0] for call in read_secret.call_args_list],
-            ["CHAT_SECRET", "EMBEDDING_SECRET"],
-        )
         embeddings_factory.assert_called_once_with(
             model="embedding-model",
             api_key="embedding-token",
@@ -393,7 +378,7 @@ class RunnerTests(unittest.TestCase):
         ):
             result = CVE_expert_seq.main()
 
-        validate.assert_called_once_with(require_embedding=True)
+        validate.assert_called_once_with()
         build.assert_called_once_with(runtime_config)
         run.assert_called_once_with(
             pipeline,
