@@ -15,6 +15,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Current phase: three JSON taxonomy/benchmark pairs replace the hard-coded Python labels and 20-case fixture. CLI CVE IDs are required; optional `--benchmark` scores only requested cases.
 - The linear stage order remains unchanged. Classification now groups labels under an approximate input budget and enforces `most_specific` ancestor removal.
 - The filter now fetches its shared query embedding during CVE processing so an upstream failure is attributed to one CVE; console errors retain stage context even for HTML gateway responses.
+- Live `RunnableSequence` runs now persist per-CVE stage timings without storing prompt or response content.
 
 ## Durable user decisions
 
@@ -575,6 +576,13 @@ These are proposals, not authorization to edit production code:
 - `CVE-2020-14864` was the sole label mismatch: the expected `PathAndResourceSelection` became `AccessControl`. Its two filtered reference entries yielded no summaries, leaving a generic NVD description about unauthorized access in the classifier context. This is evidence of thin technical context, not proof of a taxonomy or prompt defect.
 - The reported HTML HTTP 502 did not recur. The installed OpenAI client retries HTTP 5xx responses twice by default; the source endpoint cannot be identified from the pasted truncated console line. The filter previously fetched its query embedding during pipeline construction, so a 502 there could abort the whole batch before any per-CVE log existed.
 - Moved that shared query embedding request into the filter stage and cache it after success. A failure now produces a per-CVE terminal filter record and the next CVE can try again. Console errors put safe stage/CVE context first and replace HTML gateway bodies with a short diagnostic. An offline fake covers a transient query-embedding failure; one post-fix live CVE run under `debugpy` completed successfully. All 83 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks passed.
+
+### 2026-09-18 — Ten-CVE timing rerun
+
+- Reran the first ten flat-fixture CVEs under `debugpy` with a temporary profiling wrapper and isolated output; the existing `logs/RUN_0.json` was preserved. The run took about 265 seconds and again ended with 6 success, 4 degraded, 0 terminal errors, and 0.9 exact-match accuracy/micro precision/recall/F1.
+- Measured stage totals: semantic chunking 81.8 seconds, summarization 67.7, classification 46.0, reference extraction 38.1, cosine filtering 20.3, NVD 10.6, and pipeline construction 0.2. `CVE-2020-14864` (62.2 seconds) and `CVE-2016-9079` (80.4 seconds) account for about 54% of pipeline time. The former extracted a 126,192-character multi-CVE Oracle advisory and produced no accepted summary; the latter had eight pages and 194 chunks. A short final CVE still took 18.1 seconds in classification, showing endpoint latency varies independently of evidence length.
+- Added a LangChain callback to record top-level stage wall times in each live run's CVE log, including the failed stage. It records only stage name, duration, and success/error status. These measurements include client pacing and remote service latency, so they do not isolate provider compute time.
+- The timing change passed all 84 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks.
 
 ## Notes maintenance checklist
 

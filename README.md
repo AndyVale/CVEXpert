@@ -64,6 +64,8 @@ This is a live workflow: it contacts NVD, downloads external pages, and invokes 
 
 By default, the template writes benchmark results to `logs/RUN_0.json`. Classification-only runs use distinct `logs/CLASSIFY_*.json` files and omit expected labels and scores. Benchmark logs retain each case's rationale and sources. The log directory and benchmark run number are configurable in `[evaluation]`.
 
+Each CVE entry records `stage_timings` for the live linear pipeline, including a stage that failed. Durations are wall-clock seconds and include service latency and request pacing; they are useful for locating slow stages but do not by themselves separate server time from waiting.
+
 ## Pipeline
 
 ```text

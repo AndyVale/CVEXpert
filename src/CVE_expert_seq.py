@@ -44,6 +44,7 @@ from Graph.reporting import (
     render_runtime_config,
     report_error,
 )
+from Graph.stage_timing import StageTimingCallback
 
 
 LOGGER = get_logger("runner")
@@ -121,9 +122,15 @@ def _run_cases(
             else {}
         )
         LOGGER.info("%s Analyzing %s", run_label, cve_id)
+        stage_timer = StageTimingCallback(pipeline_names)
         try:
             started = time.time()
-            state = pipeline_instance.invoke({"cve_id": cve_id})
+            if isinstance(pipeline_instance, lcr.RunnableSequence):
+                state = pipeline_instance.invoke(
+                    {"cve_id": cve_id}, config={"callbacks": [stage_timer]}
+                )
+            else:
+                state = pipeline_instance.invoke({"cve_id": cve_id})
             elapsed = time.time() - started
             predicted = state["cve_labels"]
             warnings = list(state.get("pipeline_warnings", []))
@@ -143,6 +150,8 @@ def _run_cases(
                 "labels_confidence": state.get("labels_confidence", []),
                 **case_metadata,
             }
+            if stage_timer.records:
+                entry["stage_timings"] = stage_timer.records
             if expected is not None:
                 entry["individual_scores"] = compute_individual_scores(
                     expected, predicted, taxonomy.all_labels
@@ -164,7 +173,7 @@ def _run_cases(
                 error.original_error if isinstance(error, PipelineStageError) else error
             )
             report_error(LOGGER, f"{run_label} {safe_message}", technical_error)
-            log["cves"][cve_id] = {
+            error_entry = {
                 "status": "error",
                 "pipeline_warnings": [],
                 "error": details,
@@ -172,6 +181,9 @@ def _run_cases(
                 "classification_output": ["ERROR"],
                 **case_metadata,
             }
+            if stage_timer.records:
+                error_entry["stage_timings"] = stage_timer.records
+            log["cves"][cve_id] = error_entry
         _write_log(output_file, log)
         LOGGER.debug("%s Log updated for %s", run_label, cve_id)
 

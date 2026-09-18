@@ -27,6 +27,7 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `src/Graph/errors.py`: terminal `PipelineStageError` and recoverable `PipelineWarning` records.
 - `src/Graph/request_pacing.py`: thread-safe minimum-interval pacing shared across synchronous chat, embedding, and NVD requests.
 - `src/Graph/reporting.py`: centralized tqdm-safe console logging, ANSI severity colors, concise diagnostics, redaction, and the verbose runtime-configuration table.
+- `src/Graph/stage_timing.py`: callback that records top-level linear stage durations without storing prompts or responses.
 - `src/Graph/Nodes/`: reusable pipeline stages. The `Graph` name and several LangGraph-oriented docstrings are historical; these objects are also used as ordinary LangChain callables.
 - `tests/`: standard-library `unittest` regression suite. Tests use fakes and must remain offline.
 - `imgs/system.png`: an older high-level architecture diagram that omits some current stages.
@@ -54,6 +55,8 @@ Terminal NVD, filtering, formatter-precondition, or classifier failures raise `P
 `CosineFilterNode` requests and caches its query embedding during the first CVE with chunks. A failed request becomes a per-CVE filter error, leaving later CVEs able to retry. HTML gateway error bodies are summarized in console diagnostics, with the stage and CVE shown first.
 
 The template writes benchmark results to `logs/RUN_0.json`; classification-only runs write distinct `logs/CLASSIFY_*.json` files. `[evaluation].log_directory` and benchmark `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Benchmark metrics score successful and degraded requested CVEs, exclude terminal errors, and report exact-match accuracy, micro precision/recall/F1, and `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields. Classification-only artifacts omit scores and expected labels.
+
+Live `RunnableSequence` runs also record per-CVE `stage_timings` in seconds, including a failed stage. These wall-clock durations include endpoint latency and configured pacing; timing callbacks never persist stage input or output content.
 
 ### State fields
 

@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from langchain_core.runnables import RunnableLambda
+
 from Definitions.config import (
     ChatSettings,
     ClassificationSettings,
@@ -225,6 +227,37 @@ class StateLoaderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_real_sequence_logs_stage_timings_for_success_and_error(self):
+        def pass_stage(state):
+            return state
+
+        def fail_stage(state):
+            raise PipelineStageError(
+                stage="classify",
+                cve_id=state["cve_id"],
+                error=RuntimeError("temporary failure"),
+                safe_message="Classifier failed",
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pipeline = RunnableLambda(pass_stage) | RunnableLambda(fail_stage)
+            CVE_expert_seq.run_classification(
+                pipeline,
+                ["pass_stage", "fail_stage"],
+                make_runtime_config(temp_dir),
+                TEST_TAXONOMY,
+                ["CVE-2024-0001"],
+            )
+            log_path = next(Path(temp_dir).glob("CLASSIFY_*.json"))
+            entry = json.loads(log_path.read_text(encoding="utf-8"))["cves"]["CVE-2024-0001"]
+
+        self.assertEqual(entry["status"], "error")
+        self.assertEqual(
+            [(record["stage"], record["status"]) for record in entry["stage_timings"]],
+            [("pass_stage", "success"), ("fail_stage", "error")],
+        )
+        self.assertTrue(all(record["seconds"] >= 0 for record in entry["stage_timings"]))
+
     def test_build_pipeline_uses_provider_neutral_toml_settings(self):
         runtime_config = make_runtime_config("logs/test-run")
         embeddings_client = FakeEmbeddingsClient()
