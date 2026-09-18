@@ -68,16 +68,51 @@ class CosineFilterTests(unittest.TestCase):
             ["...", "aligned"],
         )
 
-    def test_zero_query_vector_is_rejected_during_construction(self):
-        with self.assertRaisesRegex(ValueError, "zero vector"):
-            CosineFilterNode(
-                embed_model=StubEmbeddings(
-                    query_embedding=[0.0, 0.0],
-                    document_embeddings=[],
-                ),
-                query="query",
-                threshold=0.6,
-            )
+    def test_zero_query_vector_is_a_filter_stage_error(self):
+        node = CosineFilterNode(
+            embed_model=StubEmbeddings(
+                query_embedding=[0.0, 0.0],
+                document_embeddings=[],
+            ),
+            query="query",
+            threshold=0.6,
+        )
+        with self.assertRaises(PipelineStageError) as raised:
+            node({
+                "cve_id": "CVE-TEST-1",
+                "nvd_references_chunks": {"https://example.test": ["chunk"]},
+            })
+        self.assertEqual(raised.exception.stage, "filter")
+        self.assertIn("zero vector", str(raised.exception.original_error))
+
+    def test_query_embedding_failure_is_scoped_to_one_cve_and_retried_next_time(self):
+        class FlakyEmbeddings(StubEmbeddings):
+            query_calls = 0
+
+            def embed_query(self, _query):
+                self.query_calls += 1
+                if self.query_calls == 1:
+                    raise RuntimeError("temporary HTTP 502")
+                return [1.0, 0.0]
+
+        embeddings = FlakyEmbeddings([1.0, 0.0], [[1.0, 0.0]])
+        node = CosineFilterNode(embeddings, query="query", threshold=0.6)
+        self.assertEqual(embeddings.query_calls, 0)
+
+        with self.assertRaises(PipelineStageError) as raised:
+            node({
+                "cve_id": "CVE-TEST-1",
+                "nvd_references_chunks": {"https://example.test": ["chunk"]},
+            })
+        self.assertEqual(raised.exception.stage, "filter")
+        self.assertEqual(raised.exception.cve_id, "CVE-TEST-1")
+
+        state = node({
+            "cve_id": "CVE-TEST-2",
+            "nvd_references_chunks": {"https://example.test": ["chunk"]},
+        })
+        self.assertEqual(state["nvd_filtered_chunks"]["https://example.test"], ["chunk"])
+        self.assertEqual(embeddings.query_calls, 2)
 
     def test_embedding_dimension_mismatch_is_a_filter_stage_error(self):
         node = CosineFilterNode(

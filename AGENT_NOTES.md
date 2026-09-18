@@ -14,6 +14,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
 - Current phase: three JSON taxonomy/benchmark pairs replace the hard-coded Python labels and 20-case fixture. CLI CVE IDs are required; optional `--benchmark` scores only requested cases.
 - The linear stage order remains unchanged. Classification now groups labels under an approximate input budget and enforces `most_specific` ancestor removal.
+- The filter now fetches its shared query embedding during CVE processing so an upstream failure is attributed to one CVE; console errors retain stage context even for HTML gateway responses.
 
 ## Durable user decisions
 
@@ -567,6 +568,13 @@ These are proposals, not authorization to edit production code:
 - Required positional CVE IDs for all runs; `--benchmark` is optional. In benchmark mode, requested IDs are matched against the configured JSON before client construction and scored in CLI order. Missing requested IDs fail setup; extra JSON cases are harmless.
 - Added per-CVE and aggregate exact-match accuracy alongside micro precision, recall, and F1. Aggregate metrics and coverage describe only the requested subset; terminal failures remain excluded from scores.
 - Updated CLI, fixture, runner, and evaluator tests plus README and repository guidance. All 81 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks passed. No live service calls were made.
+
+### 2026-09-18 — Live debugger investigation of a reported HTTP 502
+
+- Ran one CVE and then the first ten flat-fixture CVEs under `debugpy` with the configured endpoints. The ten-case benchmark wrote to a temporary directory to preserve the existing `logs/RUN_0.json`; it completed with 6 success, 4 degraded, and 0 terminal errors. All 17 warnings were reference scrape `ValueError`s, not HTTP 502s. Scored subset accuracy, micro precision, recall, and F1 were each 0.9.
+- `CVE-2020-14864` was the sole label mismatch: the expected `PathAndResourceSelection` became `AccessControl`. Its two filtered reference entries yielded no summaries, leaving a generic NVD description about unauthorized access in the classifier context. This is evidence of thin technical context, not proof of a taxonomy or prompt defect.
+- The reported HTML HTTP 502 did not recur. The installed OpenAI client retries HTTP 5xx responses twice by default; the source endpoint cannot be identified from the pasted truncated console line. The filter previously fetched its query embedding during pipeline construction, so a 502 there could abort the whole batch before any per-CVE log existed.
+- Moved that shared query embedding request into the filter stage and cache it after success. A failure now produces a per-CVE terminal filter record and the next CVE can try again. Console errors put safe stage/CVE context first and replace HTML gateway bodies with a short diagnostic. An offline fake covers a transient query-embedding failure; one post-fix live CVE run under `debugpy` completed successfully. All 83 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks passed.
 
 ## Notes maintenance checklist
 

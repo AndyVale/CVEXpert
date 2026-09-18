@@ -42,6 +42,14 @@ class FakeBatchError(RuntimeError):
     }
 
 
+class FakeHTMLServerError(RuntimeError):
+    status_code = 502
+    body = "<!DOCTYPE html><html><head><title>Gateway error</title></head></html>"
+
+    def __init__(self):
+        super().__init__(f"Error code: 502 - {self.body}")
+
+
 class FakeTerminal(io.StringIO):
     def isatty(self) -> bool:
         return True
@@ -164,7 +172,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Quota exceeded", detail)
         self.assertNotIn("{'error'", detail)
 
-    def test_short_terminal_messages_prioritize_provider_diagnostics(self):
+    def test_short_terminal_messages_include_stage_and_provider_diagnostics(self):
         stream = io.StringIO()
         logger = configure_console(verbose=True, stream=stream, use_color=False)
         warning = {
@@ -183,7 +191,28 @@ class ReportingTests(unittest.TestCase):
         lines = stream.getvalue().splitlines()
         self.assertEqual(len(lines), 2)
         self.assertTrue(all("FakeAPIError (HTTP 429)" in line for line in lines))
-        self.assertTrue(all("Quota exceeded" in line for line in lines))
+        self.assertIn("Quota exceeded", lines[0])
+        self.assertIn("filter stage failed for CVE-TEST", lines[1])
+
+    def test_html_gateway_error_keeps_stage_context_visible(self):
+        stream = io.StringIO()
+        logger = configure_console(verbose=False, stream=stream, use_color=False)
+
+        with patch(
+            "Graph.reporting.shutil.get_terminal_size",
+            return_value=os.terminal_size((80, 24)),
+        ):
+            report_error(
+                logger,
+                "filter stage failed for CVE-2024-0001",
+                FakeHTMLServerError(),
+            )
+
+        output = stream.getvalue()
+        self.assertIn("filter stage failed for CVE-2024-0001", output)
+        self.assertIn("HTTP 502", output)
+        self.assertNotIn("<!DOCTYPE", output)
+        self.assertNotIn("<html", output)
 
     def test_long_provider_token_is_preserved_when_line_is_shortened(self):
         stream = io.StringIO()

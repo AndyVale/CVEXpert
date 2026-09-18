@@ -20,6 +20,7 @@ ANSI_YELLOW = "\033[33m"
 ANSI_RED = "\033[31m"
 ANSI_RESET = "\033[0m"
 _URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
+_HTML_ERROR_PATTERN = re.compile(r"<!doctype\s+html|<html(?:\s|>)", re.IGNORECASE)
 
 
 def get_logger(component: str | None = None) -> logging.Logger:
@@ -92,6 +93,8 @@ def concise_exception(error: BaseException) -> str:
 
     message = _collapse_whitespace(_extract_provider_message(error))
     message = _sanitize_urls_in_text(message)
+    if _HTML_ERROR_PATTERN.search(message):
+        message = "Upstream service returned an HTML error page"
     if not message:
         message = "No additional diagnostic detail"
 
@@ -207,7 +210,7 @@ def report_error(
     """Print one terminal error with short technical context."""
 
     logger.error(
-        _shorten_console_line(f"ERROR {concise_exception(error)} — {message}")
+        _shorten_console_line(f"ERROR {message} — {concise_exception(error)}")
     )
 
 

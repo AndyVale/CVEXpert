@@ -82,6 +82,8 @@ The summarizer uses root-label descriptions for broad guidance. The classifier e
 
 An individual reference scrape, chunk, or summary failure produces a warning and a `degraded` result when usable evidence remains. NVD, embedding/filter, formatting-precondition, and classifier failures produce an explicit `error`; operational failures are never converted into a valid-looking `NONE` label.
 
+The filter obtains its query embedding during the first CVE that has chunks to filter. If that request fails, the failure is logged for that CVE and later CVEs can retry it. Console diagnostics keep the stage and CVE visible and summarize HTML gateway errors without printing the page body.
+
 ## Offline verification
 
 The automated suite uses standard-library `unittest` and fakes all external services:

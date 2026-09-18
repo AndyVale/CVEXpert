@@ -244,6 +244,11 @@ class RunnerTests(unittest.TestCase):
                 return_value=embeddings_client,
             ) as embeddings_factory,
             patch.object(
+                embeddings_client,
+                "embed_query",
+                side_effect=RuntimeError("temporary HTTP 502"),
+            ) as embed_query,
+            patch.object(
                 CVE_expert_seq,
                 "init_chat_model",
                 return_value=chat_client,
@@ -258,6 +263,7 @@ class RunnerTests(unittest.TestCase):
             http_client=embedding_http_client,
             check_embedding_ctx_length=False,
         )
+        embed_query.assert_not_called()
         self.assertEqual(
             [call.kwargs for call in chat_factory.call_args_list],
             [

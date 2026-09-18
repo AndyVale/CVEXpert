@@ -51,6 +51,8 @@ The CLI requires positional CVE IDs and accepts optional `--benchmark` and `-v`/
 
 Terminal NVD, filtering, formatter-precondition, or classifier failures raise `PipelineStageError`; they must never be converted to `NONE`. A successful, validated model response may return `["NONE"]`. Individual reference scrape, chunk, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`.
 
+`CosineFilterNode` requests and caches its query embedding during the first CVE with chunks. A failed request becomes a per-CVE filter error, leaving later CVEs able to retry. HTML gateway error bodies are summarized in console diagnostics, with the stage and CVE shown first.
+
 The template writes benchmark results to `logs/RUN_0.json`; classification-only runs write distinct `logs/CLASSIFY_*.json` files. `[evaluation].log_directory` and benchmark `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Benchmark metrics score successful and degraded requested CVEs, exclude terminal errors, and report exact-match accuracy, micro precision/recall/F1, and `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields. Classification-only artifacts omit scores and expected labels.
 
 ### State fields

@@ -75,10 +75,8 @@ class CosineFilterNode:
         self.embed_model = embed_model
         self.query = query
         self.threshold = threshold
-        # Pre-compute query embedding once using LangChain's embed_query method
-        self.query_embedding = _normalize_query_embedding(
-            self.embed_model.embed_query(query)
-        )
+        # Fetch once during filtering so an endpoint failure belongs to a CVE run.
+        self.query_embedding: np.ndarray | None = None
 
     def __call__(self, state: CVEClassifierState) -> CVEClassifierState:
         """
@@ -106,6 +104,10 @@ class CosineFilterNode:
             self.threshold,
         )
         try:
+            if self.query_embedding is None:
+                self.query_embedding = _normalize_query_embedding(
+                    self.embed_model.embed_query(self.query)
+                )
             for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
                 if not chunks:
                     filtered_results[url] = []
