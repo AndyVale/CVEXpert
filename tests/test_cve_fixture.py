@@ -49,6 +49,26 @@ class JsonFixtureTests(unittest.TestCase):
                                 set(taxonomy.ancestors_of(label)) & set(case.labels)
                             )
 
+    def test_benchmark_selects_requested_cases_and_ignores_unrequested_cases(self):
+        for variant in ("flat", "hierarchical", "hybrid"):
+            with self.subTest(variant=variant):
+                directory = FIXTURE_ROOT / variant
+                taxonomy = load_taxonomy(directory / "taxonomy.json")
+                benchmark = load_benchmark(
+                    directory / "expected-classification.json", taxonomy
+                )
+                requested = [benchmark.cases[2].cve_id, benchmark.cases[0].cve_id]
+
+                selected = benchmark.select(requested)
+
+                self.assertEqual([case.cve_id for case in selected.cases], requested)
+                self.assertEqual(selected.cases[0], benchmark.cases[2])
+                self.assertEqual(selected.source_path, benchmark.source_path)
+                self.assertEqual(len(benchmark.cases), 50)
+
+                with self.assertRaisesRegex(FixtureError, "CVE-2099-9999"):
+                    benchmark.select([requested[0], "CVE-2099-9999"])
+
     def test_rejects_unknown_parent_and_cycles(self):
         base = {
             "name": "Test",

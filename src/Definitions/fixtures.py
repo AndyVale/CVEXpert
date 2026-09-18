@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from collections.abc import Sequence
 from typing import Any
 
 
@@ -104,6 +105,26 @@ class Benchmark:
     cases: tuple[BenchmarkCase, ...]
     source_path: Path
     taxonomy_sha256: str
+
+    def select(self, cve_ids: Sequence[str]) -> Benchmark:
+        """Select requested cases in CLI order, preserving their provenance."""
+
+        requested = [normalize_cve_id(cve_id) for cve_id in cve_ids]
+        if not requested:
+            raise FixtureError("Benchmark requires one or more CVE IDs")
+        if len(requested) != len(set(requested)):
+            raise FixtureError("Duplicate CVE IDs are not allowed")
+        by_id = {case.cve_id: case for case in self.cases}
+        missing = [cve_id for cve_id in requested if cve_id not in by_id]
+        if missing:
+            raise FixtureError(
+                "CVE IDs missing from expected classifications: " + ", ".join(missing)
+            )
+        return Benchmark(
+            cases=tuple(by_id[cve_id] for cve_id in requested),
+            source_path=self.source_path,
+            taxonomy_sha256=self.taxonomy_sha256,
+        )
 
 
 def load_taxonomy(path: str | Path) -> Taxonomy:

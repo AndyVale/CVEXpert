@@ -226,7 +226,7 @@ def run_evaluation(
     benchmark: Benchmark,
     run_number: int | None = None,
 ):
-    """Run the selected JSON benchmark in file order."""
+    """Score the selected benchmark cases in their requested order."""
 
     if benchmark.taxonomy_sha256 != taxonomy.fingerprint:
         raise FixtureError("Benchmark does not match the selected taxonomy")
@@ -394,10 +394,10 @@ def main(
     benchmark: bool = False,
     cve_ids: Sequence[str] = (),
 ):
-    """Build one live pipeline and run exactly one requested mode."""
+    """Build one live pipeline for the requested CVEs, optionally with scoring."""
 
-    if benchmark == bool(cve_ids):
-        raise ValueError("Choose --benchmark or one or more CVE IDs")
+    if not cve_ids:
+        raise ValueError("Provide one or more CVE IDs")
     normalized_ids = [normalize_cve_id(cve_id) for cve_id in cve_ids]
     if len(normalized_ids) != len(set(normalized_ids)):
         raise FixtureError("Duplicate CVE IDs are not allowed")
@@ -412,7 +412,7 @@ def main(
             raise FixtureError(
                 "--benchmark requires [fixtures].expected_classification_file"
             )
-        selected_benchmark = load_benchmark(expected_path, taxonomy)
+        selected_benchmark = load_benchmark(expected_path, taxonomy).select(normalized_ids)
     configure_console(
         verbose=verbose,
         sensitive_values=(
@@ -455,18 +455,18 @@ def cli(argv: Sequence[str] | None = None) -> int:
     """Run the command-line entry point with concise top-level failures."""
 
     parser = argparse.ArgumentParser(
-        description="Classify CVEs or run the configured JSON benchmark.",
+        description="Classify CVEs, optionally scoring them against configured expected classifications.",
     )
     parser.add_argument(
         "cve_ids",
         metavar="CVE-ID",
         nargs="*",
-        help="one or more CVE IDs to classify without ground-truth scoring",
+        help="one or more CVE IDs to classify",
     )
     parser.add_argument(
         "--benchmark",
         action="store_true",
-        help="evaluate the expected-classification JSON selected in config.toml",
+        help="score the requested CVEs against the JSON selected in config.toml",
     )
     parser.add_argument(
         "-v",
@@ -475,8 +475,8 @@ def cli(argv: Sequence[str] | None = None) -> int:
         help="show the effective configuration and detailed stage summaries",
     )
     args = parser.parse_args(argv)
-    if args.benchmark == bool(args.cve_ids):
-        parser.error("choose --benchmark or one or more CVE IDs")
+    if not args.cve_ids:
+        parser.error("provide one or more CVE IDs")
     configure_console(verbose=args.verbose)
 
     try:

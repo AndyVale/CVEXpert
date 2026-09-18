@@ -45,13 +45,13 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 7. `CVEClassifierNode` evaluates the configured labels in token-bounded groups, removes selected ancestors of selected descendants, and returns `NONE` only when no group selects a label.
 8. `run_evaluation` compares predictions with the selected JSON cases and writes metrics; `run_classification` handles explicit CVE IDs without ground-truth scoring.
 
-`main()` loads and validates `config.toml` and the selected JSON before client construction, builds the pipeline once, then processes either explicit CVE IDs or the selected benchmark cases in order. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat, embedding, and NVD requests have separate configurable minimum intervals; summarization and classification share the chat pacer, semantic chunking and filtering share the embedding pacer, and all CVEs share one NVD pacer.
+`main()` requires explicit CVE IDs, loads and validates `config.toml` and the selected JSON before client construction, builds the pipeline once, then processes the requested CVEs in CLI order. With `--benchmark`, every requested ID must exist in the expected-classification JSON and only those cases are scored; unrequested JSON cases are ignored. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat, embedding, and NVD requests have separate configurable minimum intervals; summarization and classification share the chat pacer, semantic chunking and filtering share the embedding pacer, and all CVEs share one NVD pacer.
 
-The CLI requires `--benchmark` or positional CVE IDs, never both, and accepts `-v`/`--verbose` in either mode. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall.
+The CLI requires positional CVE IDs and accepts optional `--benchmark` and `-v`/`--verbose`. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall.
 
 Terminal NVD, filtering, formatter-precondition, or classifier failures raise `PipelineStageError`; they must never be converted to `NONE`. A successful, validated model response may return `["NONE"]`. Individual reference scrape, chunk, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`.
 
-The template writes benchmark results to `logs/RUN_0.json`; classification-only runs write distinct `logs/CLASSIFY_*.json` files. `[evaluation].log_directory` and benchmark `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Benchmark metrics score successful and degraded classifications, exclude terminal errors, and report `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields. Classification-only artifacts omit scores and expected labels.
+The template writes benchmark results to `logs/RUN_0.json`; classification-only runs write distinct `logs/CLASSIFY_*.json` files. `[evaluation].log_directory` and benchmark `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Benchmark metrics score successful and degraded requested CVEs, exclude terminal errors, and report exact-match accuracy, micro precision/recall/F1, and `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields. Classification-only artifacts omit scores and expected labels.
 
 ### State fields
 
@@ -82,7 +82,7 @@ uv sync --python 3.12
 Run commands through that environment without requiring shell activation:
 
 ```bash
-uv run python src/CVE_expert_seq.py --benchmark
+uv run python src/CVE_expert_seq.py --benchmark CVE-2021-27103
 uv run python src/CVE_expert_seq.py CVE-2021-27103 --verbose
 ```
 
@@ -90,7 +90,7 @@ Alternatively, activate it first:
 
 ```bash
 source .venv/bin/activate
-python src/CVE_expert_seq.py
+python src/CVE_expert_seq.py CVE-2021-27103
 ```
 
 Run project commands from the repository root. `config.py` resolves `config.toml` from that root even if the launch directory differs. Source imports still rely on `src` being placed on `sys.path` by running a file under `src/` or setting `PYTHONPATH=src` for module-based checks.

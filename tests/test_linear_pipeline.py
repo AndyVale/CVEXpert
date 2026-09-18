@@ -128,7 +128,7 @@ class EvaluatorTests(unittest.TestCase):
 
         self.assertEqual(
             scores,
-            {"precision": 1.0, "recall": 1.0, "f1": 1.0},
+            {"accuracy": 1.0, "precision": 1.0, "recall": 1.0, "f1": 1.0},
         )
 
     def test_grouped_scores_cover_multiple_cves(self):
@@ -138,6 +138,7 @@ class EvaluatorTests(unittest.TestCase):
             ALL_LABELS,
         )
 
+        self.assertEqual(scores["accuracy"], 1.0)
         self.assertEqual(scores["precision"], 1.0)
         self.assertEqual(scores["recall"], 1.0)
         self.assertEqual(scores["f1"], 1.0)
@@ -147,8 +148,19 @@ class EvaluatorTests(unittest.TestCase):
 
         self.assertEqual(
             scores,
-            {"precision": 0.0, "recall": 0.0, "f1": 0.0},
+            {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0},
         )
+
+    def test_exact_match_accuracy_counts_complete_label_sets(self):
+        scores = compute_grouped_scores(
+            [["XSS"], ["SQLi"]],
+            [["XSS"], ["XSS", "SQLi"]],
+            ALL_LABELS,
+        )
+
+        self.assertEqual(scores["accuracy"], 0.5)
+        self.assertEqual(scores["recall"], 1.0)
+        self.assertLess(scores["precision"], 1.0)
 
 
 class FormatterTests(unittest.TestCase):
@@ -344,9 +356,35 @@ class RunnerTests(unittest.TestCase):
             ["XSS"],
         )
         self.assertEqual(log["aggregated_scores"]["f1"], 1.0)
+        self.assertEqual(log["aggregated_scores"]["accuracy"], 1.0)
         self.assertEqual(log["pipeline_metadata"]["taxonomy_sha256"], "test-fingerprint")
         self.assertEqual(log["cves"]["CVE-TEST-1"]["rationale"], "Why CVE-TEST-1")
         self.assertEqual(log["cves"]["CVE-TEST-1"]["sources"], ["https://source.test"])
+
+    def test_benchmark_log_and_scores_cover_only_requested_subset(self):
+        benchmark = make_benchmark({
+            "CVE-2024-0001": ["XSS"],
+            "CVE-2024-0002": ["SQLi"],
+            "CVE-2024-0003": ["XSS"],
+        }).select(["CVE-2024-0003", "CVE-2024-0002"])
+        pipeline = FakePipeline({
+            "CVE-2024-0003": {"cve_labels": ["XSS"]},
+            "CVE-2024-0002": {"cve_labels": ["XSS"]},
+        })
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            CVE_expert_seq.run_evaluation(
+                pipeline, ["FakePipeline"], make_runtime_config(temp_dir),
+                TEST_TAXONOMY, benchmark,
+            )
+            log = json.loads((Path(temp_dir) / "RUN_0.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(pipeline.invocations, ["CVE-2024-0003", "CVE-2024-0002"])
+        self.assertEqual(list(log["cves"]), pipeline.invocations)
+        self.assertEqual(log["aggregated_scores"]["total"], 2)
+        self.assertEqual(log["aggregated_scores"]["scored"], 2)
+        self.assertEqual(log["aggregated_scores"]["accuracy"], 0.5)
+        self.assertEqual(log["cves"]["CVE-2024-0002"]["individual_scores"]["accuracy"], 0.0)
 
     def test_run_reports_degraded_and_terminal_error_coverage(self):
         test_cves = {
@@ -414,6 +452,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(
             log["aggregated_scores"],
             {
+                "accuracy": 1.0,
                 "precision": 1.0,
                 "recall": 1.0,
                 "f1": 1.0,
@@ -492,7 +531,7 @@ class RunnerTests(unittest.TestCase):
                 return_value="Finished: Run 0",
             ) as run,
         ):
-            result = CVE_expert_seq.main(benchmark=True)
+            result = CVE_expert_seq.main(benchmark=True, cve_ids=["CVE-2024-0001"])
 
         validate.assert_called_once_with()
         load_taxonomy.assert_called_once_with(runtime_config.fixtures.resolved_taxonomy_file())
@@ -539,10 +578,10 @@ class RunnerTests(unittest.TestCase):
                 return_value="CONFIG TABLE",
             ) as render_config,
         ):
-            CVE_expert_seq.main(verbose=False, benchmark=True)
+            CVE_expert_seq.main(verbose=False, benchmark=True, cve_ids=["CVE-2024-0001"])
             render_config.assert_not_called()
 
-            CVE_expert_seq.main(verbose=True, benchmark=True)
+            CVE_expert_seq.main(verbose=True, benchmark=True, cve_ids=["CVE-2024-0001"])
             render_config.assert_called_once()
 
     def test_main_classifies_explicit_ids_without_loading_configured_benchmark(self):
@@ -577,8 +616,51 @@ class RunnerTests(unittest.TestCase):
             patch.object(CVE_expert_seq, "build_pipeline") as build,
             self.assertRaisesRegex(ValueError, "expected_classification_file"),
         ):
-            CVE_expert_seq.main(benchmark=True)
+            CVE_expert_seq.main(benchmark=True, cve_ids=["CVE-2024-0001"])
         build.assert_not_called()
+
+    def test_main_rejects_missing_expected_cve_before_client_creation(self):
+        runtime_config = make_runtime_config("logs/test-run")
+        benchmark = make_benchmark({"CVE-2024-0001": ["XSS"]})
+        with (
+            patch.object(CVE_expert_seq, "validate_runtime_config", return_value=runtime_config),
+            patch.object(CVE_expert_seq, "load_taxonomy", return_value=TEST_TAXONOMY),
+            patch.object(CVE_expert_seq, "load_benchmark", return_value=benchmark),
+            patch.object(CVE_expert_seq, "build_pipeline") as build,
+            self.assertRaisesRegex(ValueError, "CVE-2024-0002"),
+        ):
+            CVE_expert_seq.main(
+                benchmark=True, cve_ids=["CVE-2024-0001", "CVE-2024-0002"]
+            )
+        build.assert_not_called()
+
+    def test_main_benchmarks_only_requested_cases_in_cli_order(self):
+        runtime_config = make_runtime_config("logs/test-run")
+        benchmark = make_benchmark({
+            "CVE-2024-0001": ["XSS"],
+            "CVE-2024-0002": ["SQLi"],
+            "CVE-2024-0003": ["XSS"],
+        })
+        pipeline = FakePipeline({})
+        with (
+            patch.object(CVE_expert_seq, "configure_console"),
+            patch.object(CVE_expert_seq, "validate_runtime_config", return_value=runtime_config),
+            patch.object(CVE_expert_seq, "load_taxonomy", return_value=TEST_TAXONOMY),
+            patch.object(CVE_expert_seq, "load_benchmark", return_value=benchmark),
+            patch.object(CVE_expert_seq, "build_pipeline", return_value=(pipeline, ["FakePipeline"])),
+            patch.object(CVE_expert_seq, "run_evaluation") as run,
+        ):
+            CVE_expert_seq.main(
+                benchmark=True, cve_ids=["CVE-2024-0003", "CVE-2024-0001"]
+            )
+
+        selected = run.call_args.args[4]
+        self.assertEqual(
+            [case.cve_id for case in selected.cases],
+            ["CVE-2024-0003", "CVE-2024-0001"],
+        )
+        self.assertEqual(selected.source_path, benchmark.source_path)
+        self.assertEqual(selected.taxonomy_sha256, benchmark.taxonomy_sha256)
 
     def test_main_rejects_duplicate_cve_ids_before_loading_config(self):
         with (
@@ -590,10 +672,10 @@ class RunnerTests(unittest.TestCase):
 
     def test_cli_passes_verbose_flag_to_main(self):
         with patch.object(CVE_expert_seq, "main") as main:
-            exit_code = CVE_expert_seq.cli(["--verbose", "--benchmark"])
+            exit_code = CVE_expert_seq.cli(["--verbose", "--benchmark", "CVE-2024-0001"])
 
         self.assertEqual(exit_code, 0)
-        main.assert_called_once_with(verbose=True, benchmark=True, cve_ids=[])
+        main.assert_called_once_with(verbose=True, benchmark=True, cve_ids=["CVE-2024-0001"])
 
     def test_cli_passes_explicit_cve_ids_to_classification_mode(self):
         with patch.object(CVE_expert_seq, "main") as main:
@@ -605,8 +687,8 @@ class RunnerTests(unittest.TestCase):
             cve_ids=["CVE-2024-0001", "CVE-2024-0002"],
         )
 
-    def test_cli_rejects_missing_or_mixed_modes(self):
-        for args in ([], ["--benchmark", "CVE-2024-0001"]):
+    def test_cli_requires_cve_ids_with_or_without_benchmark(self):
+        for args in ([], ["--benchmark"]):
             with self.subTest(args=args), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as raised:
                     CVE_expert_seq.cli(args)
@@ -619,7 +701,7 @@ class RunnerTests(unittest.TestCase):
             "main",
             side_effect=RuntimeError("short technical detail"),
         ), redirect_stderr(stream):
-            exit_code = CVE_expert_seq.cli(["--benchmark"])
+            exit_code = CVE_expert_seq.cli(["--benchmark", "CVE-2024-0001"])
 
         self.assertEqual(exit_code, 1)
         self.assertIn("RuntimeError: short technical detail", stream.getvalue())

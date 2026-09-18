@@ -12,7 +12,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
 - Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
-- Current phase: three JSON taxonomy/benchmark pairs replace the hard-coded Python labels and 20-case fixture. The CLI now separates explicit-CVE classification from `--benchmark` evaluation.
+- Current phase: three JSON taxonomy/benchmark pairs replace the hard-coded Python labels and 20-case fixture. CLI CVE IDs are required; optional `--benchmark` scores only requested cases.
 - The linear stage order remains unchanged. Classification now groups labels under an approximate input budget and enforces `most_specific` ancestor removal.
 
 ## Durable user decisions
@@ -43,14 +43,14 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 22. Provider endpoint changes are outside the verbose-reporting unit. The user intends to use a separately hosted OpenAI-compatible embedding endpoint while retaining the current chat provider, but will configure those ignored local values separately.
 23. NVD calls use their own shared minimum-interval pacer. Because the active client does not send an NVD API key, the tracked and local default is `6.1` seconds, providing slight headroom over the keyless five-requests-per-30-seconds allowance. This pacing does not add retries or API-key support.
 24. The three 50-case expected-classification JSON files are the configured benchmark annotations. Their rationales and source lists are provenance, not runtime instructions; validate their canonical taxonomy fingerprints before evaluation.
-25. `[fixtures].taxonomy_file` is required; `[fixtures].expected_classification_file` is optional and loaded only with `--benchmark`. Positional CVE IDs run without scoring, and the two CLI modes cannot be combined.
+25. `[fixtures].taxonomy_file` is required; `[fixtures].expected_classification_file` is optional and loaded only with `--benchmark`. Positional CVE IDs are always required. With `--benchmark`, each requested ID must have an expected case; unrequested cases are ignored and the requested subset is scored in CLI order.
 26. `[classification].max_input_tokens` is an approximate rendered prompt and schema budget, estimated as `ceil(1.2 × UTF-8 bytes ÷ 3)`. The tracked example uses 12,000; provider tokenization may differ.
 
 ## Repository understanding
 
 ### What the current program actually is
 
-`src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, `run_classification()`, and `main()`. It loads ignored local `config.toml` and the selected taxonomy before client construction, builds one LangChain `RunnableSequence`, then processes explicit CVE IDs or configured benchmark cases in order.
+`src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, `run_classification()`, and `main()`. It loads ignored local `config.toml` and the selected taxonomy before client construction, builds one LangChain `RunnableSequence`, then processes explicit CVE IDs in CLI order. Optional benchmark scoring uses only their expected cases.
 
 Each CVE invocation performs the entire live workflow:
 
@@ -63,7 +63,7 @@ cve_id
   -> LLM summaries per reference
   -> combined RAG context
   -> structured LLM classification over token-bounded label groups
-  -> per-CVE results and benchmark-only aggregate micro metrics
+  -> per-CVE results and benchmark-only exact-match accuracy and aggregate micro metrics
   -> JSON run log
 ```
 
@@ -73,7 +73,7 @@ There is no acquisition, page, chunk, embedding, or summary cache. Each requeste
 
 - Entry point: `src/CVE_expert_seq.py`
 - Supplied benchmark cases: 50 in each of the flat, hierarchical, and hybrid pairs
-- Evaluation runs: 1, sequential, stable JSON case order; explicit CVE mode has no ground-truth scoring
+- Evaluation runs: 1, sequential, CLI CVE order; runs without `--benchmark` have no ground-truth scoring
 - Supplied taxonomy labels: 9 flat, 39 hierarchical, 84 hybrid
 - Classifier input estimate: 12,000 tokens per call in the tracked template
 - NVD request delay: `6.1` seconds in the tracked keyless example
@@ -198,7 +198,7 @@ The old eight-run/160-NVD-request burst is resolved: the default now makes one s
 
 Remaining evidence:
 
-- A full benchmark still performs 20 fresh NVD requests and repeats page, embedding, summary, and classification work on every invocation.
+- A run still performs one fresh NVD request per requested CVE and repeats page, embedding, summary, and classification work on every invocation.
 - NVD calls are paced, but there is still no NVD API-key support, bounded retry/backoff, reference-origin limiter, response cache, or persistent preprocessing artifact.
 - Model endpoints now have configurable minimum request intervals, but no token-per-minute accounting, adaptive handling of quota headers, or persistent request/cost telemetry.
 
@@ -346,7 +346,7 @@ Approach:
 
 Evidence:
 
-- A benchmark run processes the selected JSON cases once in file order with both tracked chat temperatures set to zero.
+- A benchmark run processes the requested JSON cases once in CLI order with both tracked chat temperatures set to zero.
 - Acquisition results can change between repeated evaluations.
 - Provider implementations may still vary at temperature zero, and the run does not capture artifact/config hashes or source timestamps.
 - Run metadata says `RUN_N + 1` while filenames are zero-based.
@@ -561,6 +561,12 @@ These are proposals, not authorization to edit production code:
 - Split CLI use into positional CVE classification with no scores and explicit `--benchmark` evaluation. Both modes share the linear pipeline; benchmark logs keep `RUN_N.json`, while classification logs receive unique names.
 - The summarizer now receives root-label guidance. The classifier estimates rendered prompt plus schema size under `[classification].max_input_tokens`, groups labels deterministically, and removes selected ancestors across groups. A group failure is terminal; `NONE` requires all groups to select no label.
 - At this snapshot, all 76 offline tests pass; compilation, lock consistency, installed dependency consistency, whitespace, selected local configuration, and byte-for-byte fixture checks pass. No live NVD, reference, embedding, or chat calls were made.
+
+### 2026-09-18 — CLI-selected benchmark subsets
+
+- Required positional CVE IDs for all runs; `--benchmark` is optional. In benchmark mode, requested IDs are matched against the configured JSON before client construction and scored in CLI order. Missing requested IDs fail setup; extra JSON cases are harmless.
+- Added per-CVE and aggregate exact-match accuracy alongside micro precision, recall, and F1. Aggregate metrics and coverage describe only the requested subset; terminal failures remain excluded from scores.
+- Updated CLI, fixture, runner, and evaluator tests plus README and repository guidance. All 81 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks passed. No live service calls were made.
 
 ## Notes maintenance checklist
 
