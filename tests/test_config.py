@@ -39,6 +39,13 @@ breakpoint_threshold_amount = 25.0
 query = "CVE-specific relevance query"
 threshold = 0.6
 
+[fixtures]
+taxonomy_file = "fixtures/flat/taxonomy.json"
+expected_classification_file = "fixtures/flat/expected-classification.json"
+
+[classification]
+max_input_tokens = 12000
+
 [evaluation]
 log_directory = "logs/test-run"
 run_number = 3
@@ -71,6 +78,32 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.nvd.request_delay_seconds, 6.1)
         self.assertEqual(settings.references.max_pages, 7)
         self.assertEqual(settings.evaluation.run_number, 3)
+        self.assertEqual(settings.classification.max_input_tokens, 12000)
+        self.assertEqual(
+            settings.fixtures.resolved_taxonomy_file(),
+            config.REPOSITORY_ROOT / "fixtures/flat/taxonomy.json",
+        )
+
+    def test_expected_classification_path_is_optional(self):
+        without_cases = VALID_CONFIG.replace(
+            'expected_classification_file = "fixtures/flat/expected-classification.json"\n',
+            "",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = config.load_runtime_config(self._write_config(temp_dir, without_cases))
+        self.assertIsNone(settings.fixtures.resolved_expected_classification_file())
+
+    def test_classifier_budget_must_be_positive_integer(self):
+        for invalid in ("0", "-1", "true", "12.5"):
+            with self.subTest(invalid=invalid):
+                content = VALID_CONFIG.replace("max_input_tokens = 12000", f"max_input_tokens = {invalid}")
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    path = self._write_config(temp_dir, content)
+                    with self.assertRaisesRegex(
+                        config.RuntimeConfigurationError,
+                        r"\[classification\]\.max_input_tokens",
+                    ):
+                        config.load_runtime_config(path)
 
     def test_api_keys_are_hidden_from_configuration_repr(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -183,6 +216,8 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(example["embedding"]["request_delay_seconds"], 0.0)
         self.assertEqual(example["nvd"]["request_delay_seconds"], 6.1)
         self.assertFalse(example["embedding"]["check_embedding_ctx_length"])
+        self.assertEqual(example["fixtures"]["taxonomy_file"], "fixtures/flat/taxonomy.json")
+        self.assertEqual(example["classification"]["max_input_tokens"], 12000)
 
     def test_default_config_path_is_anchored_to_repository_root(self):
         expected_root = Path(config.__file__).resolve().parents[2]

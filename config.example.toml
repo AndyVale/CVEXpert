@@ -38,6 +38,15 @@ breakpoint_threshold_amount = 25.0
 query = "What type of vulnerability is it?"
 threshold = 0.6
 
+[fixtures]
+taxonomy_file = "fixtures/flat/taxonomy.json"
+# Optional. Only read when the CLI uses --benchmark.
+expected_classification_file = "fixtures/flat/expected-classification.json"
+
+[classification]
+# Approximate maximum input tokens for each classifier model call.
+max_input_tokens = 12000
+
 [evaluation]
 log_directory = "logs"
 run_number = 0

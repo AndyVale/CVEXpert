@@ -79,6 +79,11 @@ def make_runtime_config():
             query="What type of vulnerability is it?",
             threshold=0.6,
         ),
+        fixtures=SimpleNamespace(
+            resolved_taxonomy_file=lambda: Path("/tmp/fixtures/flat/taxonomy.json"),
+            resolved_expected_classification_file=lambda: Path("/tmp/fixtures/flat/expected-classification.json"),
+        ),
+        classification=SimpleNamespace(max_input_tokens=12000),
         evaluation=SimpleNamespace(
             resolved_log_directory=lambda: Path("/tmp/test-logs"),
             run_number=0,
@@ -209,7 +214,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("embedding-model", table)
         self.assertIn("request delay (s)", table)
         self.assertIn("6.1", table)
-        self.assertIn("benchmark CVEs", table)
+        self.assertIn("selected CVEs", table)
         self.assertIn("configured", table)
         self.assertNotIn("chat-secret", table)
         self.assertNotIn("embedding-secret", table)

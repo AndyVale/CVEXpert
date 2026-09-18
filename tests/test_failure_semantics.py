@@ -1,6 +1,8 @@
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
+from Definitions.fixtures import Taxonomy, TaxonomyLabel
 from Graph.errors import PipelineStageError
 from Graph.Nodes.classifiers import (
     CVEClassifierNode,
@@ -14,6 +16,15 @@ from Graph.Nodes.nvd import nvd_caller
 
 
 LABELS = {"XSS": "Cross-site scripting", "SQLi": "SQL injection"}
+TAXONOMY = Taxonomy(
+    name="Test",
+    labels=(
+        TaxonomyLabel("XSS", "Cross-site scripting", "Scripts execute in a browser"),
+        TaxonomyLabel("SQLi", "SQL injection", "Input alters an SQL query"),
+    ),
+    fingerprint="test",
+    source_path=Path("/tmp/test-taxonomy.json"),
+)
 
 
 class StubModel:
@@ -138,7 +149,7 @@ class FilterFailureTests(unittest.TestCase):
 
 class ClassifierFailureTests(unittest.TestCase):
     def test_active_classifier_propagates_model_failure(self):
-        node = CVEClassifierNode(StubModel([RuntimeError("model failed")]), LABELS)
+        node = CVEClassifierNode(StubModel([RuntimeError("model failed")]), TAXONOMY, 12000)
 
         with self.assertRaises(PipelineStageError) as raised:
             node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})
@@ -156,12 +167,12 @@ class ClassifierFailureTests(unittest.TestCase):
 
         for case_name, response in invalid_responses.items():
             with self.subTest(case_name=case_name):
-                node = CVEClassifierNode(StubModel([response]), LABELS)
+                node = CVEClassifierNode(StubModel([response]), TAXONOMY, 12000)
                 with self.assertRaises(PipelineStageError):
                     node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})
 
     def test_valid_none_is_a_successful_classification(self):
-        node = CVEClassifierNode(StubModel([{"labels": ["NONE"]}]), LABELS)
+        node = CVEClassifierNode(StubModel([{"labels": ["NONE"]}]), TAXONOMY, 12000)
 
         state = node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})
 

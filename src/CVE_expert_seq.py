@@ -6,17 +6,27 @@ import argparse
 import os
 import json
 import time
+from datetime import datetime, timezone
 from collections.abc import Sequence
 from functools import partial
+from pathlib import Path
+from uuid import uuid4
 
 from langchain.chat_models import init_chat_model
 import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 from openai import DefaultHttpxClient
 
-from Definitions.const import CVE_TEST
 from Definitions.config import CONFIG_PATH, RuntimeConfig, validate_runtime_config
-from Definitions.labels import LABELS_DESCRIPTIONS, ALL_LABELS
+from Definitions.fixtures import (
+    Benchmark,
+    BenchmarkCase,
+    FixtureError,
+    Taxonomy,
+    load_benchmark,
+    load_taxonomy,
+    normalize_cve_id,
+)
 
 from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.scrapers import extract_md_trafilatura
@@ -55,164 +65,214 @@ def _serialize_pipeline_error(error, cve_id):
     )
     return details, safe_message
 
-def run_evaluation(
+def _write_log(output_file: Path, log: dict) -> None:
+    with open(output_file, "w", encoding="utf-8") as handle:
+        json.dump(log, handle, indent=2)
+
+
+def _run_cases(
     pipeline_instance,
-    pipeline_names,
+    pipeline_names: list[str],
     runtime_config: RuntimeConfig,
+    taxonomy: Taxonomy,
+    cases: Sequence[BenchmarkCase | str],
+    output_file: Path,
+    *,
+    benchmark: Benchmark | None = None,
     run_number: int | None = None,
 ):
-    """Run one ordered benchmark pass while isolating failures per CVE."""
+    """Persist each result while isolating failures to individual CVEs."""
 
-    if run_number is None:
-        run_number = runtime_config.evaluation.run_number
-
-    run_id_str = '_'.join(pipeline_names)
     run_folder = runtime_config.evaluation.resolved_log_directory()
     os.makedirs(run_folder, exist_ok=True)
+    mode = "benchmark" if benchmark is not None else "classification"
+    run_label = f"[Run {run_number}]" if benchmark is not None else "[Classification]"
+    LOGGER.info("%s Starting. Log: %s", run_label, output_file)
 
-    output_file = run_folder / f"RUN_{run_number}.json"
-
-    LOGGER.info("[Run %s] Starting. Log: %s", run_number, output_file)
-
-    log = {
-        "pipeline_metadata": {
-            "run_id": run_id_str,
-            "RUN_N": run_number + 1,
-            "pipeline_structure": pipeline_names, # Fixed variable name usage
-            "models": runtime_config.model_metadata,
-            "labels_schema": LABELS_DESCRIPTIONS
-        },
-        "cves": {},
-        "aggregated_scores": {}
+    metadata = {
+        "run_id": "_".join(pipeline_names),
+        "mode": mode,
+        "pipeline_structure": pipeline_names,
+        "models": runtime_config.model_metadata,
+        "taxonomy_name": taxonomy.name,
+        "taxonomy_file": str(taxonomy.source_path),
+        "taxonomy_sha256": taxonomy.fingerprint,
+        "labels_schema": taxonomy.descriptions,
     }
+    if benchmark is not None:
+        metadata["RUN_N"] = run_number + 1
+        metadata["expected_classification_file"] = str(benchmark.source_path)
+    log = {"pipeline_metadata": metadata, "cves": {}}
+    if benchmark is not None:
+        log["aggregated_scores"] = {}
 
-    all_y_true = []
-    all_y_pred = []
-    for cve, expected_labels in CVE_TEST.items():
-        LOGGER.info("[Run %s] Analyzing %s", run_number, cve)
-        
+    all_y_true: list[list[str]] = []
+    all_y_pred: list[list[str]] = []
+    for case in cases:
+        cve_id = case.cve_id if isinstance(case, BenchmarkCase) else case
+        expected = list(case.labels) if isinstance(case, BenchmarkCase) else None
+        case_metadata = (
+            {
+                "expected_labels": expected,
+                "rationale": case.rationale,
+                "sources": list(case.sources),
+            }
+            if isinstance(case, BenchmarkCase)
+            else {}
+        )
+        LOGGER.info("%s Analyzing %s", run_label, cve_id)
         try:
-            t = time.time()
-            state = pipeline_instance.invoke({"cve_id": cve})
-            t = time.time() - t
-            predicted_labels = state["cve_labels"]
-            individual_scores = compute_individual_scores(expected_labels, predicted_labels, ALL_LABELS)
-            pipeline_warnings = list(state.get("pipeline_warnings", []))
-            status = "degraded" if pipeline_warnings else "success"
-
-            log["cves"][cve] = {
+            started = time.time()
+            state = pipeline_instance.invoke({"cve_id": cve_id})
+            elapsed = time.time() - started
+            predicted = state["cve_labels"]
+            warnings = list(state.get("pipeline_warnings", []))
+            status = "degraded" if warnings else "success"
+            entry = {
                 "status": status,
-                "pipeline_warnings": pipeline_warnings,
+                "pipeline_warnings": warnings,
                 "nvd_description": state.get("nvd_description", ""),
                 "nvd_references_pages": state.get("nvd_references_pages", {}),
                 "nvd_references_chunks": state.get("nvd_references_chunks", {}),
                 "nvd_filtered_chunks": state.get("nvd_filtered_chunks", {}),
-                "summaries": state.get("summaries", {}), 
+                "summaries": state.get("summaries", {}),
                 "rag_input": state.get("rag", ""),
-                "expected_labels": expected_labels,
-                "classification_output": predicted_labels,
-                "required_time":t, # optional
-                "labels_motivation": state.get("labels_motivation", []), # optional
-                "labels_confidence": state.get("labels_confidence", []), # optional
-                "individual_scores": individual_scores
+                "classification_output": predicted,
+                "required_time": elapsed,
+                "labels_motivation": state.get("labels_motivation", []),
+                "labels_confidence": state.get("labels_confidence", []),
+                **case_metadata,
             }
-            
-            all_y_true.append(expected_labels)
-            all_y_pred.append(predicted_labels)
+            if expected is not None:
+                entry["individual_scores"] = compute_individual_scores(
+                    expected, predicted, taxonomy.all_labels
+                )
+                all_y_true.append(expected)
+                all_y_pred.append(predicted)
+            log["cves"][cve_id] = entry
             LOGGER.info(
-                "[Run %s] %s finished: status=%s labels=%s duration=%.2fs",
-                run_number,
-                cve,
+                "%s %s finished: status=%s labels=%s duration=%.2fs",
+                run_label,
+                cve_id,
                 status,
-                predicted_labels,
-                t,
+                predicted,
+                elapsed,
             )
-
         except Exception as error:
-            error_details, error_msg = _serialize_pipeline_error(error, cve)
+            details, safe_message = _serialize_pipeline_error(error, cve_id)
             technical_error = (
-                error.original_error
-                if isinstance(error, PipelineStageError)
-                else error
+                error.original_error if isinstance(error, PipelineStageError) else error
             )
-            report_error(
-                LOGGER,
-                f"[Run {run_number}] {error_msg}",
-                technical_error,
-            )
-            
-            log["cves"][cve] = {
+            report_error(LOGGER, f"{run_label} {safe_message}", technical_error)
+            log["cves"][cve_id] = {
                 "status": "error",
                 "pipeline_warnings": [],
-                "error": error_details,
-                "error_message": error_msg,
-                "expected_labels": expected_labels,
-                "classification_output": ["ERROR"]
+                "error": details,
+                "error_message": safe_message,
+                "classification_output": ["ERROR"],
+                **case_metadata,
             }
-
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(log, f, indent=2)
-
-        LOGGER.debug("[Run %s] Log updated for %s", run_number, cve)
-
-    aggregation_complete = True
-    if all_y_true and all_y_pred:
-        try:
-            log["aggregated_scores"] = compute_grouped_scores(
-                all_y_true,
-                all_y_pred,
-                ALL_LABELS,
-            )
-        except Exception as error:
-            report_error(
-                LOGGER,
-                f"[Run {run_number}] Aggregate metric computation failed",
-                error,
-            )
-            aggregation_complete = False
-            log["aggregated_scores"] = {
-                "error": "Aggregate metric computation failed",
-                "error_type": type(error).__name__,
-            }
-    else:
-        log["aggregated_scores"] = {"note": "No successful predictions to aggregate."}
+        _write_log(output_file, log)
+        LOGGER.debug("%s Log updated for %s", run_label, cve_id)
 
     statuses = [entry["status"] for entry in log["cves"].values()]
-    total = len(CVE_TEST)
-    scored = len(all_y_true)
     successful = statuses.count("success")
     degraded = statuses.count("degraded")
     failed = statuses.count("error")
-    log["aggregated_scores"].update(
-        {
-            "total": total,
-            "scored": scored,
-            "successful": successful,
-            "degraded": degraded,
-            "failed": failed,
-            "complete": (
-                aggregation_complete
-                and failed == 0
-                and scored == total
-            ),
-        }
-    )
-    
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(log, f, indent=2)
+    if benchmark is not None:
+        aggregation_complete = True
+        if all_y_true:
+            try:
+                log["aggregated_scores"] = compute_grouped_scores(
+                    all_y_true, all_y_pred, taxonomy.all_labels
+                )
+            except Exception as error:
+                report_error(LOGGER, f"{run_label} Aggregate metric computation failed", error)
+                aggregation_complete = False
+                log["aggregated_scores"] = {
+                    "error": "Aggregate metric computation failed",
+                    "error_type": type(error).__name__,
+                }
+        else:
+            log["aggregated_scores"] = {"note": "No successful predictions to aggregate."}
+        log["aggregated_scores"].update(
+            {
+                "total": len(cases),
+                "scored": len(all_y_true),
+                "successful": successful,
+                "degraded": degraded,
+                "failed": failed,
+                "complete": aggregation_complete and failed == 0 and len(all_y_true) == len(cases),
+            }
+        )
+        _write_log(output_file, log)
 
     LOGGER.info(
-        "[Run %s] Completed: successful=%s degraded=%s failed=%s file=%s",
-        run_number,
+        "%s Completed: successful=%s degraded=%s failed=%s file=%s",
+        run_label,
         successful,
         degraded,
         failed,
         output_file.resolve(),
     )
-    return f"Finished: Run {run_number}"
+    return f"Finished: Run {run_number}" if benchmark is not None else "Finished: Classification"
 
 
-def build_pipeline(runtime_config: RuntimeConfig):
+def run_evaluation(
+    pipeline_instance,
+    pipeline_names: list[str],
+    runtime_config: RuntimeConfig,
+    taxonomy: Taxonomy,
+    benchmark: Benchmark,
+    run_number: int | None = None,
+):
+    """Run the selected JSON benchmark in file order."""
+
+    if benchmark.taxonomy_sha256 != taxonomy.fingerprint:
+        raise FixtureError("Benchmark does not match the selected taxonomy")
+    if run_number is None:
+        run_number = runtime_config.evaluation.run_number
+    output_file = runtime_config.evaluation.resolved_log_directory() / f"RUN_{run_number}.json"
+    return _run_cases(
+        pipeline_instance,
+        pipeline_names,
+        runtime_config,
+        taxonomy,
+        benchmark.cases,
+        output_file,
+        benchmark=benchmark,
+        run_number=run_number,
+    )
+
+
+def run_classification(
+    pipeline_instance,
+    pipeline_names: list[str],
+    runtime_config: RuntimeConfig,
+    taxonomy: Taxonomy,
+    cve_ids: Sequence[str],
+):
+    """Classify explicit CVEs without ground-truth scoring."""
+
+    normalized_ids = [normalize_cve_id(cve_id) for cve_id in cve_ids]
+    if not normalized_ids or len(normalized_ids) != len(set(normalized_ids)):
+        raise FixtureError("Classification requires unique CVE IDs")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    output_file = (
+        runtime_config.evaluation.resolved_log_directory()
+        / f"CLASSIFY_{stamp}_{uuid4().hex[:8]}.json"
+    )
+    return _run_cases(
+        pipeline_instance,
+        pipeline_names,
+        runtime_config,
+        taxonomy,
+        normalized_ids,
+        output_file,
+    )
+
+
+def build_pipeline(runtime_config: RuntimeConfig, taxonomy: Taxonomy):
     """Construct the configured live linear pipeline after validation."""
 
     LOGGER.debug("Constructing embedding client and linear pipeline")
@@ -272,7 +332,7 @@ def build_pipeline(runtime_config: RuntimeConfig):
 
     summarizer = CVEAwareSummarizerNode(
         model=summarizer_llm,
-        labels_descriptions=LABELS_DESCRIPTIONS,
+        labels_descriptions=taxonomy.root_descriptions,
     )
 
     classifier_llm = init_chat_model(
@@ -286,7 +346,8 @@ def build_pipeline(runtime_config: RuntimeConfig):
 
     classifier = CVEClassifierNode(
         model=classifier_llm,
-        labels_descriptions=LABELS_DESCRIPTIONS,
+        taxonomy=taxonomy,
+        max_input_tokens=runtime_config.classification.max_input_tokens,
     )
 
     configured_nvd_caller = partial(
@@ -327,11 +388,31 @@ def build_pipeline(runtime_config: RuntimeConfig):
     return pipeline, pipeline_component_names
 
 
-def main(*, verbose: bool = False):
-    """Build the live pipeline and run the benchmark exactly once."""
+def main(
+    *,
+    verbose: bool = False,
+    benchmark: bool = False,
+    cve_ids: Sequence[str] = (),
+):
+    """Build one live pipeline and run exactly one requested mode."""
+
+    if benchmark == bool(cve_ids):
+        raise ValueError("Choose --benchmark or one or more CVE IDs")
+    normalized_ids = [normalize_cve_id(cve_id) for cve_id in cve_ids]
+    if len(normalized_ids) != len(set(normalized_ids)):
+        raise FixtureError("Duplicate CVE IDs are not allowed")
 
     configure_console(verbose=verbose)
     runtime_config = validate_runtime_config()
+    taxonomy = load_taxonomy(runtime_config.fixtures.resolved_taxonomy_file())
+    selected_benchmark = None
+    if benchmark:
+        expected_path = runtime_config.fixtures.resolved_expected_classification_file()
+        if expected_path is None:
+            raise FixtureError(
+                "--benchmark requires [fixtures].expected_classification_file"
+            )
+        selected_benchmark = load_benchmark(expected_path, taxonomy)
     configure_console(
         verbose=verbose,
         sensitive_values=(
@@ -345,18 +426,47 @@ def main(*, verbose: bool = False):
             render_runtime_config(
                 runtime_config,
                 config_path=CONFIG_PATH,
-                cve_count=len(CVE_TEST),
+                cve_count=(
+                    len(selected_benchmark.cases)
+                    if selected_benchmark is not None
+                    else len(normalized_ids)
+                ),
             ),
         )
-    pipeline, pipeline_component_names = build_pipeline(runtime_config)
-    return run_evaluation(pipeline, pipeline_component_names, runtime_config)
+    pipeline, pipeline_component_names = build_pipeline(runtime_config, taxonomy)
+    if selected_benchmark is not None:
+        return run_evaluation(
+            pipeline,
+            pipeline_component_names,
+            runtime_config,
+            taxonomy,
+            selected_benchmark,
+        )
+    return run_classification(
+        pipeline,
+        pipeline_component_names,
+        runtime_config,
+        taxonomy,
+        normalized_ids,
+    )
 
 
 def cli(argv: Sequence[str] | None = None) -> int:
     """Run the command-line entry point with concise top-level failures."""
 
     parser = argparse.ArgumentParser(
-        description="Run the linear CVExpert benchmark pipeline.",
+        description="Classify CVEs or run the configured JSON benchmark.",
+    )
+    parser.add_argument(
+        "cve_ids",
+        metavar="CVE-ID",
+        nargs="*",
+        help="one or more CVE IDs to classify without ground-truth scoring",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="evaluate the expected-classification JSON selected in config.toml",
     )
     parser.add_argument(
         "-v",
@@ -365,10 +475,16 @@ def cli(argv: Sequence[str] | None = None) -> int:
         help="show the effective configuration and detailed stage summaries",
     )
     args = parser.parse_args(argv)
+    if args.benchmark == bool(args.cve_ids):
+        parser.error("choose --benchmark or one or more CVE IDs")
     configure_console(verbose=args.verbose)
 
     try:
-        main(verbose=args.verbose)
+        main(
+            verbose=args.verbose,
+            benchmark=args.benchmark,
+            cve_ids=args.cve_ids,
+        )
     except KeyboardInterrupt:
         LOGGER.error("ERROR Pipeline interrupted by the user")
         return 130

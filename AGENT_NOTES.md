@@ -4,7 +4,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 
 ## Current status
 
-- Last updated: 2026-08-30 (Europe/Rome)
+- Last updated: 2026-09-18 (Europe/Rome)
 - Active branch: `main`
 - Linear code snapshot includes the direct-TOML credential migration documented in the 2026-08-30 work log below.
 - Graph branch snapshot reviewed for comparison: `graphCVExpert` at `411baf6`
@@ -12,8 +12,8 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Initial review/memory commit completed: `bf12e38` (`docs: add persistent agent notes and pipeline review`)
 - First reliability batch implemented through `9a3a704` (`fix: compute true cosine similarity`)
 - Model request pacing implemented in `d023bae` (`feat: pace model endpoint requests`).
-- Current phase: configurable NVD request pacing is committed in `67f0641`; the 20-case `CVE_TEST` annotation audit is implemented and verified locally.
-- The flat taxonomy itself, prompts, pipeline stage order, and artifact shape remain unchanged. `CVE_TEST` values and evidence comments have been re-audited; former hard-coded model/stage/evaluation values are validated local TOML settings.
+- Current phase: three JSON taxonomy/benchmark pairs replace the hard-coded Python labels and 20-case fixture. The CLI now separates explicit-CVE classification from `--benchmark` evaluation.
+- The linear stage order remains unchanged. Classification now groups labels under an approximate input budget and enforces `most_specific` ancestor removal.
 
 ## Durable user decisions
 
@@ -24,9 +24,9 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 5. The desired long-term product shape is both:
    - a reusable classifier that can process arbitrary individual/batch CVEs; and
    - a separate, repeatable benchmark/evaluation harness.
-6. The active linear taxonomy is flat: `CVE_TEST` refers to `LABELS_DESCRIPTIONS`. `VULNERABILITY_TREE` belongs to the graph experiment and is ignored by the active linear pipeline.
-7. Preserve the option to support either flat or hierarchical taxonomies in the future, but keep the current flat behavior that matches the linear benchmark.
-8. Intended flat-label semantics are evidence-backed multi-label classification: return every matching mechanism directly supported by evidence, and make `NONE` mutually exclusive. RCE alone is not CodeInjection, unauthenticated reach alone is not AccessControl, and a downstream impact or companion CVE's mechanism is not attributed to the CVE being classified.
+6. The active linear pipeline selects a taxonomy JSON through TOML and supports the provided flat, hierarchical, and hybrid fixtures. It does not use LangGraph.
+7. Preserve each taxonomy's `most_specific` policy: return directly supported mechanisms and omit an ancestor when a selected descendant is present. The classifier groups labels into bounded calls while retaining the linear stage sequence.
+8. `NONE` is mutually exclusive and valid only after successful classification across every group. Do not infer mechanism labels from impacts, preconditions, or companion CVEs.
 9. Chat and embedding clients use independently configurable complete OpenAI-compatible base URLs, model identifiers, and credential-variable names. They may share a URL or credential when appropriate. Embedding credential validation can be avoided when resuming from a JSON artifact that already contains a later-stage result such as filtered chunks.
 10. Future replay should resume from explicit named stages (for example, filtered chunks, summaries, or classification context), using a versioned artifact rather than a hard-coded one-off loader.
 11. Operational/model failure is not a classification. `NONE` is valid only after a successful, validated classifier response.
@@ -42,13 +42,15 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 21. Console verbosity is controlled by `-v`/`--verbose`, not TOML. Normal mode retains lifecycle messages and terminal errors but hides recoverable warnings; verbose mode adds those warnings, a safe configuration table, and stage summaries. Warnings remain recorded in `pipeline_warnings` and JSON regardless of console mode. Reporting uses standard logging plus `tqdm.write()` without a new dependency.
 22. Provider endpoint changes are outside the verbose-reporting unit. The user intends to use a separately hosted OpenAI-compatible embedding endpoint while retaining the current chat provider, but will configure those ignored local values separately.
 23. NVD calls use their own shared minimum-interval pacer. Because the active client does not send an NVD API key, the tracked and local default is `6.1` seconds, providing slight headroom over the keyless five-requests-per-30-seconds allowance. This pacing does not add retries or API-key support.
-24. `CVE_TEST` dictionary values are authoritative benchmark annotations; nearby comments must agree with and only explain those values. Interpret the active `LABELS_DESCRIPTIONS` values rather than historical comments when auditing the fixture.
+24. The three 50-case expected-classification JSON files are the configured benchmark annotations. Their rationales and source lists are provenance, not runtime instructions; validate their canonical taxonomy fingerprints before evaluation.
+25. `[fixtures].taxonomy_file` is required; `[fixtures].expected_classification_file` is optional and loaded only with `--benchmark`. Positional CVE IDs run without scoring, and the two CLI modes cannot be combined.
+26. `[classification].max_input_tokens` is an approximate rendered prompt and schema budget, estimated as `ceil(1.2 × UTF-8 bytes ÷ 3)`. The tracked example uses 12,000; provider tokenization may differ.
 
 ## Repository understanding
 
 ### What the current program actually is
 
-The active entry point is still primarily a benchmark script. `src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, and `main()`. `main()` loads the ignored local `config.toml`, builds one LangChain `RunnableSequence`, and processes the 20 hard-coded `CVE_TEST` cases once in insertion order.
+`src/CVE_expert_seq.py` exposes `build_pipeline()`, `run_evaluation()`, `run_classification()`, and `main()`. It loads ignored local `config.toml` and the selected taxonomy before client construction, builds one LangChain `RunnableSequence`, then processes explicit CVE IDs or configured benchmark cases in order.
 
 Each CVE invocation performs the entire live workflow:
 
@@ -60,18 +62,20 @@ cve_id
   -> embedding-thresholded chunks
   -> LLM summaries per reference
   -> combined RAG context
-  -> structured flat-label LLM classification
-  -> per-CVE and aggregate micro metrics
+  -> structured LLM classification over token-bounded label groups
+  -> per-CVE results and benchmark-only aggregate micro metrics
   -> JSON run log
 ```
 
-There is no acquisition, page, chunk, embedding, or summary cache. The default run no longer repeats the same benchmark eight times, but each CVE still performs fresh live work.
+There is no acquisition, page, chunk, embedding, or summary cache. Each requested CVE still performs fresh live work. A benchmark run processes each selected JSON case once.
 
 ### Selected live components and tracked template values
 
 - Entry point: `src/CVE_expert_seq.py`
-- Benchmark cases: 20
-- Evaluation runs: 1, sequential, stable `CVE_TEST` order
+- Supplied benchmark cases: 50 in each of the flat, hierarchical, and hybrid pairs
+- Evaluation runs: 1, sequential, stable JSON case order; explicit CVE mode has no ground-truth scoring
+- Supplied taxonomy labels: 9 flat, 39 hierarchical, 84 hybrid
+- Classifier input estimate: 12,000 tokens per call in the tracked template
 - NVD request delay: `6.1` seconds in the tracked keyless example
 - Chat/classifier model: user-selected placeholder
 - Summarizer model: user-selected placeholder
@@ -83,7 +87,7 @@ There is no acquisition, page, chunk, embedding, or summary cache. The default r
 - Filter: `CosineFilterNode`, query `What type of vulnerability is it?`, threshold `0.6`
 - Summarizer: `CVEAwareSummarizerNode`
 - Classifier: `CVEClassifierNode`
-- Template output location: `logs/RUN_0.json`; both directory and run number are configurable. Historical ignored artifacts under `logs/LOG_GPT_NORANDAware/` are left untouched.
+- Template benchmark output location: `logs/RUN_0.json`; classification-only outputs use unique `CLASSIFY_*.json` names. Historical ignored artifacts under `logs/LOG_GPT_NORANDAware/` are left untouched.
 
 These are configuration-shape examples, not provider-specific application defaults. Model identifiers must be replaced for the selected endpoints. The live program requires a user-created ignored `config.toml` and has no fallback constants for these values.
 
@@ -127,7 +131,7 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 - `langchain-experimental` emitted a local deprecation warning stating that it is being sunset; the selected semantic chunker currently comes from that package.
 - Local observation on 2026-08-30: `uv 0.11.26`, Python `3.14.6`, the new 85-package lock resolves, the synchronized environment is consistent, and runtime imports succeed.
 - `config.toml` is resolved relative to the repository root and contains both endpoint API keys directly. `.env` is not read. API-key fields are hidden from dataclass representations, but the full configuration object must still be treated as sensitive.
-- The repository now has 55 offline standard-library `unittest` cases covering typed TOML parsing/validation, secret-safe representations, provider-neutral client construction and request pacing, tqdm-safe reporting, color/redaction behavior, CLI verbosity and failure handling, evaluator/runner behavior, state loading, formatting, terminal failures, classifier invariants, degraded warnings, coverage reporting, deterministic execution, and cosine normalization.
+- The offline standard-library `unittest` suite covers typed TOML and JSON validation, provider-neutral client construction and pacing, reporting, CLI modes, grouped classification, evaluator/runner behavior, state loading, formatting, failure semantics, and cosine normalization.
 
 ## Documentation inconsistencies
 
@@ -141,7 +145,7 @@ The machine-specific `src/test.py` replay experiment was removed on 2026-08-30. 
 
 ### Linear `main`
 
-`main` uses a flat taxonomy and a `RunnableSequence`. Prompts remain embedded inside summarizer/classifier classes. The active script executes the full live retrieval and classification path and catches most stage errors locally.
+`main` uses the selected JSON taxonomy and a `RunnableSequence`. Prompts remain embedded inside summarizer/classifier classes. The active script executes the full live retrieval and classification path and catches most stage errors locally. Hierarchical labels are handled inside the classifier stage, without graph orchestration.
 
 ### `graphCVExpert`
 
@@ -316,25 +320,24 @@ Approach:
 - Require evidence references for every selected label.
 - If self-consistency is retained, define and validate a frequency threshold and failure policy.
 
-### P1 — Benchmark coverage is too weak for optimization
+### P1 — Supplied benchmark coverage remains incomplete for optimization
 
 Observed benchmark facts:
 
-- 20 CVEs, including one mutually exclusive `NONE` case.
-- `InputValidation` appears in 13/20 cases and `AccessControl` in 6/20.
-- `XSS`, `SQLi`, and `CSRF` have zero expected examples; `SSRF`, `OutOfBoundsRead`, `UseAfterFree`, `InfoLeak`, and `ResourceExhaustion` have one each.
-- Several labels have only one example.
-- Many examples are famous CVEs likely known to general-purpose models, so CVE-ID memorization can mask retrieval quality.
+- Each supplied benchmark has 50 cases and no `NONE` case; seven cases have multiple labels.
+- The flat set covers eight of nine labels, the hierarchical set 18 of 39, and the hybrid set 22 of 84.
+- The availability-and-resources family is unrepresented; many specific labels remain untested.
+- Live CVE evidence can change, and CVE-ID memorization can still mask retrieval quality.
 
 Impact:
 
-- Aggregate micro-F1 is dominated by common labels.
-- Per-label behavior and `NONE` handling cannot be validated.
-- Prompt/model changes can overfit a tiny, contaminated benchmark.
+- Aggregate micro-F1 can hide poor performance on rare labels.
+- `NONE` handling cannot be validated by the supplied expected cases.
+- Prompt/model changes can overfit a small, mutable live benchmark.
 
 Approach:
 
-- Preserve the documented annotation rules and re-check assignments when authoritative CVE records materially change.
+- Preserve fixture rationales and source provenance; re-check assignments when authoritative CVE records materially change.
 - Add negative/unsupported cases and balanced coverage for every label.
 - Track per-label precision/recall/F1, exact match, sample-F1, Hamming loss, coverage, latency, and cost.
 - Separate development and held-out cases; include newer/less-famous CVEs and optionally mask the CVE ID in retrieval ablations.
@@ -343,7 +346,7 @@ Approach:
 
 Evidence:
 
-- The active benchmark is now one insertion-order run with both chat temperatures set to zero.
+- A benchmark run processes the selected JSON cases once in file order with both tracked chat temperatures set to zero.
 - Acquisition results can change between repeated evaluations.
 - Provider implementations may still vary at temperature zero, and the run does not capture artifact/config hashes or source timestamps.
 - Run metadata says `RUN_N + 1` while filenames are zero-based.
@@ -379,7 +382,7 @@ Evidence:
 - The entire growing JSON document is rewritten after every CVE and once again at completion.
 - Writes are not atomic, so interruption can leave malformed JSON.
 - Directory names are hard-coded and can misdescribe the active pipeline.
-- The state/log retains full pages, chunks, filtered chunks, summaries, and RAG, creating large artifacts without schema/version/hash metadata.
+- The state/log retains full pages, chunks, filtered chunks, summaries, and RAG. Taxonomy path and fingerprint are recorded, but there is still no versioned stage-artifact contract or config hash.
 
 Approach:
 
@@ -392,13 +395,12 @@ Approach:
 Evidence:
 
 - Models, temperatures, endpoint URLs, credential-variable names, NVD URL/timeout, reference limit, semantic threshold, cosine query/threshold, run number, and log directory now come from typed, validated TOML settings.
-- `build_pipeline(runtime_config)` is reusable and `main()` is testable, but benchmark execution, scoring, persistence, and live construction still share one module.
+- `build_pipeline(runtime_config, taxonomy)` is reusable and the CLI has explicit classification and benchmark modes, but scoring, persistence, and live construction still share one module.
 - The duplicate replay runner has been removed; no supported resume entry point currently exists.
 
 Approach:
 
-- Typed configuration is complete; introduce separate pipeline/runner factories and commands when splitting the reusable classifier from the benchmark.
-- Provide separate classify and benchmark commands.
+- Typed configuration and CLI mode selection are in place; introduce separate pipeline/runner modules if a Python library API or independent commands are needed.
 - Keep resume-stage selection an input rather than a separate copied script.
 
 ### Partially resolved P2 — Structure and dependency hygiene impede safe change
@@ -407,9 +409,9 @@ Evidence:
 
 - Linear stages live under `Graph/Nodes` and retain graph-specific names/docstrings.
 - Prompts are embedded in large classes, making versioning and prompt-only tests difficult.
-- The entry points use wildcard evaluator imports.
+- The entry point now uses explicit evaluator imports.
 - Broad exceptions obscure expected failure modes.
-- The 37-case offline unit regression suite covers the reliability and configuration migrations, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
+- The offline unit suite covers reliability, configuration, JSON fixtures, and classifier grouping, but there are no controlled integration, artifact-contract, prompt snapshot, or CI checks.
 - Dependencies are now declared and reproducibly locked. The remaining structural issues are module layout, prompt isolation, experiment cleanup, and CI/integration coverage.
 
 Approach:
@@ -424,7 +426,7 @@ Approach:
 Do not start all of these at once. Keep each unit reviewable and measure behavior after each quality-affecting change.
 
 1. **Completed reliability foundation**
-   - Added an offline unit suite that currently has 55 tests covering evaluator/runner, TOML configuration, provider-neutral client construction and pacing, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
+   - Added an offline unit suite covering evaluator/runner, TOML and JSON configuration, provider-neutral client construction and pacing, NVD failures, formatter, filters, classifier variants, warnings, coverage, and state loading.
    - Defined terminal error and degraded-warning semantics, fail-fast mode-aware configuration, classifier invariants, deterministic single-run behavior, coverage reporting, and correct cosine normalization.
    - Still needed from the original contract work: a versioned artifact manifest and controlled integration fixtures.
 2. **Reliable acquisition and artifacts — recommended next**
@@ -444,7 +446,7 @@ Do not start all of these at once. Keep each unit reviewable and measure behavio
    - Expand label/negative coverage and add held-out evaluation.
    - Add per-label, exact-match, stability, latency, and cost reporting.
 6. **Only then consider larger structural cleanup**
-   - Neutral module names, packaging, prompt modules, CI, and optional taxonomy interfaces. Dependency locking is complete.
+   - Neutral module names, packaging, prompt modules, CI, and reusable taxonomy APIs. Dependency locking is complete.
    - Do not adopt LangGraph merely to reuse graph-branch improvements.
 
 ## Candidate first change units
@@ -455,7 +457,7 @@ These are proposals, not authorization to edit production code:
 2. Versioned stage-artifact schema plus a parameterized loader for named resume stages.
 3. Bounded scraper policy for URL scheme, response/content type, downloaded size, and per-origin coordination.
 4. Cached retrieval-quality harness to recalibrate cosine threshold and compare chunk/query/top-k choices without live-source drift.
-5. Benchmark annotation audit and negative/per-label coverage plan before changing `CVE_TEST`.
+5. Benchmark annotation audit and negative/per-label coverage plan before changing the selected JSON expectations.
 
 ## Open questions for future work
 
@@ -550,6 +552,15 @@ These are proposals, not authorization to edit production code:
 - Changed 13 fixtures. Notable corrections include `CVE-2025-59145` to `NONE`, Log4Shell gaining the Apache CNA's CWE-400/ResourceExhaustion classification, Heartbleed losing the logical InfoLeak label, FortiWeb losing CommandInjection, ProxyShell losing UntrustedDeserialization, ProxyLogon retaining only UntrustedDeserialization, and IngressNightmare retaining only AccessControl.
 - The resulting fixture has 40 assignments across 20 cases: 13 InputValidation, 6 AccessControl, 4 each CodeInjection and UntrustedDeserialization, 3 PathTraversal, 2 each CommandInjection and BufferOverflow, one each SSRF, OutOfBoundsRead, UseAfterFree, InfoLeak, ResourceExhaustion, and NONE, and zero XSS, SQLi, or CSRF examples.
 - Added fixture-invariant tests for nonempty, unique, allowed labels and mutually exclusive `NONE`. All 57 offline tests, Python compilation, lock consistency, installed dependency consistency, and whitespace checks passed.
+
+### 2026-09-18 — Configured JSON taxonomies and optional benchmark mode
+
+- Replaced the hard-coded Python taxonomy and 20-case dataset with byte-for-byte copies of three supplied JSON pairs under `fixtures/flat`, `fixtures/hierarchical`, and `fixtures/hybrid`. They contain 9, 39, and 84 labels respectively, and 50 cases each.
+- Added typed fixture loading with parent/cycle checks, `most_specific` validation, reserved `NONE` handling, case/provenance validation, and canonical JSON SHA-256 pair verification. The attached Markdown readmes were treated as contextual data, not implementation instructions.
+- Added required taxonomy and optional expected-classification paths in TOML; the ignored local configuration was extended without changing existing credential values. The tracked example selects the flat pair.
+- Split CLI use into positional CVE classification with no scores and explicit `--benchmark` evaluation. Both modes share the linear pipeline; benchmark logs keep `RUN_N.json`, while classification logs receive unique names.
+- The summarizer now receives root-label guidance. The classifier estimates rendered prompt plus schema size under `[classification].max_input_tokens`, groups labels deterministically, and removes selected ancestors across groups. A group failure is terminal; `NONE` requires all groups to select no label.
+- At this snapshot, all 76 offline tests pass; compilation, lock consistency, installed dependency consistency, whitespace, selected local configuration, and byte-for-byte fixture checks pass. No live NVD, reference, embedding, or chat calls were made.
 
 ## Notes maintenance checklist
 

@@ -71,6 +71,33 @@ class CosineFilterSettings:
 
 
 @dataclass(frozen=True)
+class FixtureSettings:
+    """Selected JSON taxonomy and optional benchmark cases."""
+
+    taxonomy_file: str
+    expected_classification_file: str | None
+
+    def resolved_taxonomy_file(self, repository_root: Path = REPOSITORY_ROOT) -> Path:
+        path = Path(self.taxonomy_file).expanduser()
+        return path if path.is_absolute() else repository_root / path
+
+    def resolved_expected_classification_file(
+        self, repository_root: Path = REPOSITORY_ROOT
+    ) -> Path | None:
+        if self.expected_classification_file is None:
+            return None
+        path = Path(self.expected_classification_file).expanduser()
+        return path if path.is_absolute() else repository_root / path
+
+
+@dataclass(frozen=True)
+class ClassificationSettings:
+    """Approximate classifier input budget per model call."""
+
+    max_input_tokens: int
+
+
+@dataclass(frozen=True)
 class EvaluationSettings:
     """Benchmark artifact settings."""
 
@@ -92,6 +119,8 @@ class RuntimeConfig:
     references: ReferenceSettings
     semantic_chunker: SemanticChunkerSettings
     cosine_filter: CosineFilterSettings
+    fixtures: FixtureSettings
+    classification: ClassificationSettings
     evaluation: EvaluationSettings
 
     @property
@@ -135,6 +164,14 @@ def _require_string(table: Mapping[str, object], table_name: str, key: str) -> s
     return value.strip()
 
 
+def _optional_string(
+    table: Mapping[str, object], table_name: str, key: str
+) -> str | None:
+    if key not in table:
+        return None
+    return _require_string(table, table_name, key)
+
+
 def _require_number(table: Mapping[str, object], table_name: str, key: str) -> float:
     value = table.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -173,6 +210,8 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
         "references",
         "semantic_chunker",
         "cosine_filter",
+        "fixtures",
+        "classification",
         "evaluation",
     }
     unknown_tables = sorted(set(data) - expected_tables)
@@ -217,6 +256,16 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
         {"breakpoint_threshold_type", "breakpoint_threshold_amount"},
     )
     filter_data = _require_table(data, "cosine_filter", {"query", "threshold"})
+    fixture_data = _require_table(
+        data,
+        "fixtures",
+        {"taxonomy_file", "expected_classification_file"},
+    )
+    classification_data = _require_table(
+        data,
+        "classification",
+        {"max_input_tokens"},
+    )
     evaluation_data = _require_table(
         data,
         "evaluation",
@@ -306,6 +355,11 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
     run_number = _require_integer(evaluation_data, "evaluation", "run_number")
     if run_number < 0:
         raise _configuration_error("[evaluation].run_number must be non-negative")
+    max_input_tokens = _require_integer(
+        classification_data, "classification", "max_input_tokens"
+    )
+    if max_input_tokens <= 0:
+        raise _configuration_error("[classification].max_input_tokens must be positive")
 
     return RuntimeConfig(
         chat=ChatSettings(
@@ -359,6 +413,13 @@ def _parse_runtime_config(data: Mapping[str, object]) -> RuntimeConfig:
             query=_require_string(filter_data, "cosine_filter", "query"),
             threshold=cosine_threshold,
         ),
+        fixtures=FixtureSettings(
+            taxonomy_file=_require_string(fixture_data, "fixtures", "taxonomy_file"),
+            expected_classification_file=_optional_string(
+                fixture_data, "fixtures", "expected_classification_file"
+            ),
+        ),
+        classification=ClassificationSettings(max_input_tokens=max_input_tokens),
         evaluation=EvaluationSettings(
             log_directory=_require_string(
                 evaluation_data,

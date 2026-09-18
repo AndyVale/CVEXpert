@@ -239,7 +239,7 @@ def render_runtime_config(
     rows = [
         ("runtime", "config file", str(Path(config_path).resolve())),
         ("runtime", "verbosity", "verbose"),
-        ("runtime", "benchmark CVEs", str(cve_count)),
+        ("runtime", "selected CVEs", str(cve_count)),
         ("chat", "endpoint", sanitize_url(runtime_config.chat.base_url)),
         ("chat", "API key", "configured"),
         ("chat", "classifier model", runtime_config.chat.classifier_model),
@@ -292,6 +292,21 @@ def render_runtime_config(
         ),
         ("cosine filter", "query", runtime_config.cosine_filter.query),
         ("cosine filter", "threshold", str(runtime_config.cosine_filter.threshold)),
+        (
+            "fixtures",
+            "taxonomy",
+            str(runtime_config.fixtures.resolved_taxonomy_file()),
+        ),
+        (
+            "fixtures",
+            "expected cases",
+            str(runtime_config.fixtures.resolved_expected_classification_file() or "not configured"),
+        ),
+        (
+            "classification",
+            "maximum input tokens",
+            str(runtime_config.classification.max_input_tokens),
+        ),
         (
             "evaluation",
             "log directory",
