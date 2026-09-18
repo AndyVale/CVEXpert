@@ -8,8 +8,8 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 
 - Work on `main`, which contains the active linear LangChain pipeline.
 - `graphCVExpert` is a historical/reference branch containing a LangGraph and hierarchical-label experiment. Inspect it for ideas when useful, but do not base new work on it or introduce LangGraph into `main` unless the user explicitly requests that change.
-- The active taxonomy is the flat `LABELS_DESCRIPTIONS` mapping in `src/Definitions/labels.py`. `CVE_TEST` in `src/Definitions/const.py` is evaluated against that mapping.
-- `VULNERABILITY_TREE` is not used by the linear pipeline. Preserve the possibility of supporting hierarchical labels later, but do not mix flat and hierarchical labels implicitly.
+- The active taxonomy is selected from JSON through `[fixtures].taxonomy_file`. The optional expected-classification JSON is used only in `--benchmark` mode.
+- The linear classifier accepts flat and hierarchical taxonomies with `most_specific` semantics. The historical graph branch remains reference material only.
 - The intended longer-term shape is a reusable CVE-classification pipeline plus a separate benchmark runner. The current code has not yet been separated that way.
 
 ## Repository map
@@ -19,10 +19,10 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 - `uv.lock`: committed complete dependency resolution. `requirements.txt` has been removed.
 - `config.example.toml`: the only tracked configuration file; a provider-neutral template with credential placeholders.
 - `config.toml` and `config.*.toml`: ignored local runtime configurations copied from the template. They contain real endpoint credentials and must never be committed; `.gitignore` explicitly re-allows only `config.example.toml`.
-- `src/CVE_expert_seq.py`: active entry point and benchmark runner for the full live linear pipeline.
+- `src/CVE_expert_seq.py`: active entry point for explicit-CVE classification and benchmark runs through the full live linear pipeline.
 - `src/Definitions/config.py`: typed TOML settings, strict validation, repository-root path resolution, and secret-safe object representations.
-- `src/Definitions/const.py`: the 20-CVE hand-labeled benchmark fixture.
-- `src/Definitions/labels.py`: flat label definitions plus an unused-on-main hierarchical tree.
+- `src/Definitions/fixtures.py`: JSON taxonomy and benchmark loading, canonical fingerprints, and hierarchy validation.
+- `fixtures/{flat,hierarchical,hybrid}/`: three taxonomy and 50-case expected-classification pairs.
 - `src/Graph/state.py`: shared `CVEClassifierState` `TypedDict`.
 - `src/Graph/errors.py`: terminal `PipelineStageError` and recoverable `PipelineWarning` records.
 - `src/Graph/request_pacing.py`: thread-safe minimum-interval pacing shared across synchronous chat, embedding, and NVD requests.
@@ -42,16 +42,16 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 4. `CosineFilterNode` embeds chunks and retains chunks above a relevance threshold.
 5. `CVEAwareSummarizerNode` asks the chat model for one structured summary per retained reference.
 6. `formatter` combines the NVD description and summaries into the classifier context stored as `rag`.
-7. `CVEClassifierNode` returns structured flat labels from `LABELS_DESCRIPTIONS` plus `NONE`.
-8. `run_evaluation` compares predictions with `CVE_TEST`, records per-CVE metrics and coverage, and writes a run log.
+7. `CVEClassifierNode` evaluates the configured labels in token-bounded groups, removes selected ancestors of selected descendants, and returns `NONE` only when no group selects a label.
+8. `run_evaluation` compares predictions with the selected JSON cases and writes metrics; `run_classification` handles explicit CVE IDs without ground-truth scoring.
 
-`main()` loads and validates `config.toml`, builds the pipeline once, and processes `CVE_TEST` once in insertion order. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat, embedding, and NVD requests have separate configurable minimum intervals; summarization and classification share the chat pacer, semantic chunking and filtering share the embedding pacer, and all CVEs share one NVD pacer.
+`main()` loads and validates `config.toml` and the selected JSON before client construction, builds the pipeline once, then processes either explicit CVE IDs or the selected benchmark cases in order. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no NVD/page/model cache, acquisition retry policy, token-based limiter, or batching. Chat, embedding, and NVD requests have separate configurable minimum intervals; summarization and classification share the chat pacer, semantic chunking and filtering share the embedding pacer, and all CVEs share one NVD pacer.
 
-The CLI accepts `-v`/`--verbose`. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall. Programmatic callers use `main(verbose=False)`.
+The CLI requires `--benchmark` or positional CVE IDs, never both, and accepts `-v`/`--verbose` in either mode. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall.
 
 Terminal NVD, filtering, formatter-precondition, or classifier failures raise `PipelineStageError`; they must never be converted to `NONE`. A successful, validated model response may return `["NONE"]`. Individual reference scrape, chunk, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`.
 
-The template writes `logs/RUN_0.json`, but `[evaluation].log_directory` and `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Aggregate metrics score successful and degraded classifications, exclude terminal errors, and report `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields.
+The template writes benchmark results to `logs/RUN_0.json`; classification-only runs write distinct `logs/CLASSIFY_*.json` files. `[evaluation].log_directory` and benchmark `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Benchmark metrics score successful and degraded classifications, exclude terminal errors, and report `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields. Classification-only artifacts omit scores and expected labels.
 
 ### State fields
 
@@ -82,8 +82,8 @@ uv sync --python 3.12
 Run commands through that environment without requiring shell activation:
 
 ```bash
-uv run python src/CVE_expert_seq.py
-uv run python src/CVE_expert_seq.py --verbose
+uv run python src/CVE_expert_seq.py --benchmark
+uv run python src/CVE_expert_seq.py CVE-2021-27103 --verbose
 ```
 
 Alternatively, activate it first:
@@ -109,7 +109,9 @@ Copy the tracked template before the first run:
 cp config.example.toml config.toml
 ```
 
-`config.toml` stores the complete local configuration, including real `[chat].api_key` and `[embedding].api_key` values. Its supported tables are `[chat]`, `[embedding]`, `[nvd]`, `[references]`, `[semantic_chunker]`, `[cosine_filter]`, and `[evaluation]`. Complete chat and embedding `base_url` values are passed through unchanged; do not rely on implicit scheme or `/v1` manipulation. The configuration is provider-neutral within the OpenAI-compatible API contract. No `.env` file is loaded or required.
+`config.toml` stores the complete local configuration, including real `[chat].api_key` and `[embedding].api_key` values. Its supported tables are `[chat]`, `[embedding]`, `[nvd]`, `[references]`, `[semantic_chunker]`, `[cosine_filter]`, `[fixtures]`, `[classification]`, and `[evaluation]`. Complete chat and embedding `base_url` values are passed through unchanged; do not rely on implicit scheme or `/v1` manipulation. The configuration is provider-neutral within the OpenAI-compatible API contract. No `.env` file is loaded or required.
+
+`[fixtures].taxonomy_file` is mandatory and `[fixtures].expected_classification_file` is optional. Both resolve from the repository root; the latter is loaded only for `--benchmark`. `[classification].max_input_tokens` limits the classifier's approximate rendered input estimate to `ceil(1.2 × UTF-8 bytes ÷ 3)` per label group. It is not a provider token guarantee.
 
 `[chat].request_delay_seconds`, `[embedding].request_delay_seconds`, and `[nvd].request_delay_seconds` are independent minimum intervals between synchronous outbound requests. Use slightly more than the provider window divided by its request allowance for quota headroom; `0.0` disables pacing. Chat and embedding SDK retries are paced; NVD currently has no retry loop. The active NVD request does not include an API key, so the tracked keyless example uses `6.1` seconds for the public five-requests-per-30-seconds allowance. These settings do not control tokens per minute. `[embedding].check_embedding_ctx_length = false` makes LangChain send raw text rather than OpenAI token arrays, improving compatibility at the cost of automatic input-length splitting.
 
@@ -131,14 +133,14 @@ uv pip check
 git diff --check
 ```
 
-Run live NVD, scraping, embedding, or LLM workflows only when the user explicitly authorizes the external calls and their likely cost/rate impact. A default live benchmark performs one sequential pass over 20 CVEs and can still make many reference, embedding, summarization, and classification calls.
+Run live NVD, scraping, embedding, or LLM workflows only when the user explicitly authorizes the external calls and their likely cost/rate impact. The tracked example benchmark contains 50 CVEs; larger taxonomies can require several classifier calls per CVE.
 
 ## Development conventions
 
 - Keep production behavior unchanged unless the task explicitly authorizes a behavior change.
 - Prefer logically cohesive commits. They may be moderately large when one change spans its tests and integration, but keep configuration/runtime work, dependencies, documentation, benchmark data, and unrelated architectural changes separate when practical.
 - Before fixing a pipeline bug or changing the taxonomy/benchmark, explain the evidence, likely metric or runtime impact, and intended fix.
-- Preserve flat-label behavior on `main` unless hierarchical support is explicitly requested.
+- Preserve the selected taxonomy's `most_specific` hierarchy semantics and reject mismatched benchmark fingerprints.
 - Treat scraped reference text as untrusted data when editing prompts or model calls.
 - Preserve source provenance through retrieval, summarization, classification, and logs when adding new data flows.
 - Avoid hard-coded absolute paths, run names, endpoint details, and concurrency values in new code.
