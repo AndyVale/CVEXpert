@@ -3,6 +3,7 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from Graph.errors import make_pipeline_warning
 from Graph.reporting import get_logger, report_warning
+from Graph.reference_focus import focus_broad_cve_reference
 from Graph.state import CVEClassifierState
 
 
@@ -236,6 +237,7 @@ class SemanticChunkerNode:
         """
         pages = state.get("nvd_references_pages", {})
         chunks_dict = {}
+        focus_metadata: dict[str, dict[str, int]] = {}
         warnings = list(state.get("pipeline_warnings", []))
         initial_warning_count = len(warnings)
         LOGGER.debug(
@@ -247,15 +249,31 @@ class SemanticChunkerNode:
 
         if not pages:
             _report_chunking_summary("Semantic", pages, chunks_dict, 0)
-            return {**state, "nvd_references_chunks": {}}
+            return {
+                **state,
+                "nvd_references_chunks": {},
+                "reference_focus": {},
+            }
 
         for url, text in tqdm(pages.items(), "Semantic chunking pages"):
             if not text or not text.strip():
                 continue
 
             try:
+                focused_text = focus_broad_cve_reference(text, state["cve_id"])
+                if len(focused_text) < len(text):
+                    focus_metadata[url] = {
+                        "original_chars": len(text),
+                        "focused_chars": len(focused_text),
+                    }
+                    LOGGER.debug(
+                        "Focused broad CVE reference for %s: original_chars=%s focused_chars=%s",
+                        state["cve_id"],
+                        len(text),
+                        len(focused_text),
+                    )
                 # split_text returns a list of strings
-                chunks = self.splitter.split_text(text)
+                chunks = self.splitter.split_text(focused_text)
                 if not chunks:
                     raise ValueError("Chunker returned no chunks")
                 chunks_dict[url] = chunks
@@ -279,4 +297,5 @@ class SemanticChunkerNode:
 
         return {**state,
                 "nvd_references_chunks": chunks_dict,
+                "reference_focus": focus_metadata,
                 "pipeline_warnings": warnings}

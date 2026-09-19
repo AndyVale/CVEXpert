@@ -66,6 +66,8 @@ By default, the template writes benchmark results to `logs/RUN_0.json`. Classifi
 
 Each CVE entry records `stage_timings` for the live linear pipeline, including a stage that failed. Durations are wall-clock seconds and include service latency and request pacing; they are useful for locating slow stages but do not by themselves separate server time from waiting.
 
+Before semantic chunking, a reference of at least 50,000 characters that mentions at least 100 distinct CVE IDs is treated as a broad vulnerability index. When it contains the requested CVE, chunking uses 2,000 characters of context on either side of each matching identifier. The complete extracted page remains in the log, and `reference_focus` records the original and focused character counts. Target-specific advisories and broad indexes without the requested CVE are left unchanged.
+
 ## Pipeline
 
 ```text

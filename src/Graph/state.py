@@ -14,6 +14,8 @@ class CVEClassifierState(TypedDict, total=False):
         nvd_references_pages: A dictionary mapping each URL to its full extracted text content.
         nvd_references_chunks: A dictionary mapping each (processed) URL to its full list of 
             extracted chunks.
+        reference_focus: Character counts for broad multi-CVE indexes that were narrowed to
+            target-CVE excerpts before chunking.
         nvd_filtered_chunks: A dictionary mapping each URL to the subset of chunks 
             that passed the relevance filtering.
         summaries: A dictionary mapping each URL to a summary of its relevant chunks.
@@ -28,6 +30,7 @@ class CVEClassifierState(TypedDict, total=False):
     nvd_url_references: list[str]
     nvd_references_pages: dict[str, str]
     nvd_references_chunks: dict[str, list[str]]
+    reference_focus: dict[str, dict[str, int]]
     nvd_filtered_chunks: dict[str, list[str]]
     summaries: dict[str, str]
     rag: str

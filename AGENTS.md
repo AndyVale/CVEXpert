@@ -39,7 +39,7 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 
 1. `nvd_caller` requests the CVE description and reference URLs from NVD, then ranks references by NVD tags.
 2. `extract_md_trafilatura` downloads reference pages sequentially and extracts Markdown, stopping after the configured `[references].max_pages` successful pages.
-3. `SemanticChunkerNode` splits extracted pages using an embedding-backed semantic splitter.
+3. `SemanticChunkerNode` narrows exceptionally large multi-CVE indexes to context around the requested CVE, then splits pages using an embedding-backed semantic splitter. Full extracted pages remain in state.
 4. `CosineFilterNode` embeds chunks and retains chunks above a relevance threshold.
 5. `CVEAwareSummarizerNode` asks the chat model for one structured summary per retained reference.
 6. `formatter` combines the NVD description and summaries into the classifier context stored as `rag`.
@@ -56,7 +56,7 @@ Terminal NVD, filtering, formatter-precondition, or classifier failures raise `P
 
 The template writes benchmark results to `logs/RUN_0.json`; classification-only runs write distinct `logs/CLASSIFY_*.json` files. `[evaluation].log_directory` and benchmark `run_number` are configurable. The former `logs/LOG_GPT_NORANDAware/` directory may still contain historical ignored artifacts and must not be deleted automatically. Per-CVE status is `success`, `degraded`, or `error`. Terminal errors preserve `error_message` and `classification_output: ["ERROR"]` while adding structured error details. Benchmark metrics score successful and degraded requested CVEs, exclude terminal errors, and report exact-match accuracy, micro precision/recall/F1, and `total`, `scored`, `successful`, `degraded`, `failed`, and `complete` coverage fields. Classification-only artifacts omit scores and expected labels.
 
-Live `RunnableSequence` runs also record per-CVE `stage_timings` in seconds, including a failed stage. These wall-clock durations include endpoint latency and configured pacing; timing callbacks never persist stage input or output content.
+Live `RunnableSequence` runs also record per-CVE `stage_timings` in seconds, including a failed stage. These wall-clock durations include endpoint latency and configured pacing; timing callbacks never persist stage input or output content. When chunking narrows a broad multi-CVE index, `reference_focus` records only its original and focused character counts; the complete extracted page remains in `nvd_references_pages`.
 
 ### State fields
 
@@ -66,6 +66,7 @@ Stages shallow-copy and extend a dictionary matching `CVEClassifierState`. In no
 - NVD: `nvd_description`, `nvd_url_references`
 - Scraping: `nvd_references_pages`
 - Chunking: `nvd_references_chunks`
+- Broad-index focusing, when applied: `reference_focus`
 - Filtering: `nvd_filtered_chunks`
 - Summarization: `summaries`
 - Formatting: `rag`

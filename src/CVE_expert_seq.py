@@ -150,6 +150,8 @@ def _run_cases(
                 "labels_confidence": state.get("labels_confidence", []),
                 **case_metadata,
             }
+            if state.get("reference_focus"):
+                entry["reference_focus"] = state["reference_focus"]
             if stage_timer.records:
                 entry["stage_timings"] = stage_timer.records
             if expected is not None:

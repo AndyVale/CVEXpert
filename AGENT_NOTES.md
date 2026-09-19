@@ -4,7 +4,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 
 ## Current status
 
-- Last updated: 2026-09-18 (Europe/Rome)
+- Last updated: 2026-09-19 (Europe/Rome)
 - Active branch: `main`
 - Linear code snapshot includes the direct-TOML credential migration documented in the 2026-08-30 work log below.
 - Graph branch snapshot reviewed for comparison: `graphCVExpert` at `411baf6`
@@ -16,6 +16,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - The linear stage order remains unchanged. Classification now groups labels under an approximate input budget and enforces `most_specific` ancestor removal.
 - The filter now fetches its shared query embedding during CVE processing so an upstream failure is attributed to one CVE; console errors retain stage context even for HTML gateway responses.
 - Live `RunnableSequence` runs now persist per-CVE stage timings without storing prompt or response content.
+- Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 
 ## Durable user decisions
 
@@ -102,6 +103,7 @@ These are configuration-shape examples, not provider-specific application defaul
 - `nvd_url_references`
 - `nvd_references_pages`
 - `nvd_references_chunks`
+- optional `reference_focus` character counts when a broad multi-CVE index was narrowed for chunking
 - `nvd_filtered_chunks`
 - `summaries`
 - `rag`
@@ -583,6 +585,15 @@ These are proposals, not authorization to edit production code:
 - Measured stage totals: semantic chunking 81.8 seconds, summarization 67.7, classification 46.0, reference extraction 38.1, cosine filtering 20.3, NVD 10.6, and pipeline construction 0.2. `CVE-2020-14864` (62.2 seconds) and `CVE-2016-9079` (80.4 seconds) account for about 54% of pipeline time. The former extracted a 126,192-character multi-CVE Oracle advisory and produced no accepted summary; the latter had eight pages and 194 chunks. A short final CVE still took 18.1 seconds in classification, showing endpoint latency varies independently of evidence length.
 - Added a LangChain callback to record top-level stage wall times in each live run's CVE log, including the failed stage. It records only stage name, duration, and success/error status. These measurements include client pacing and remote service latency, so they do not isolate provider compute time.
 - The timing change passed all 84 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks.
+
+### 2026-09-19 — Broad multi-CVE reference focusing
+
+- The timing profile identified a 126,192-character Oracle advisory index with 403 distinct CVE IDs as avoidable semantic-chunking work for `CVE-2020-14864`. The requested identifier appeared twice, and the page produced 159 chunks while contributing no accepted summary.
+- Before semantic chunking, pages of at least 50,000 characters with at least 100 distinct CVE IDs are now reduced to merged excerpts spanning 2,000 characters on either side of each requested-CVE occurrence. The rule does not alter smaller pages, target-specific long analyses, or indexes that omit the requested CVE. Full extracted text remains in state and logs; `reference_focus` records original/focused character counts.
+- An isolated live rerun of `CVE-2020-14864` reduced elapsed time from about 62.2 to 8.3 seconds and semantic chunks from 159 to 3 while preserving its prior `AccessControl` prediction.
+- A full live rerun of the first ten flat cases under `debugpy` took about 204.6 seconds versus 264.5 seconds in the preceding profile, a 22.6% reduction. It again completed with 6 success, 4 degraded, 0 terminal errors, unchanged predictions, and 0.9 exact-match accuracy/micro precision/recall/F1. Service timing and scraped-page availability vary, so this is an end-to-end observation rather than a controlled microbenchmark.
+- `CVE-2016-9079` remains the dominant case at about 87.2 seconds because its eight target-specific sources generated 194 chunks; the broad-index rule intentionally does not change those pages. Persistent caching, embedding reuse, and bounded reference work remain higher-value follow-up options.
+- The change passed all 87 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks.
 
 ## Notes maintenance checklist
 

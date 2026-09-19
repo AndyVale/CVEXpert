@@ -364,6 +364,12 @@ class RunnerTests(unittest.TestCase):
                     "nvd_description": "Description",
                     "nvd_references_pages": {},
                     "nvd_references_chunks": {},
+                    "reference_focus": {
+                        "https://source.test": {
+                            "original_chars": 100_000,
+                            "focused_chars": 4_000,
+                        }
+                    },
                     "nvd_filtered_chunks": {},
                     "summaries": {},
                     "rag": "Context",
@@ -399,6 +405,15 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(log["pipeline_metadata"]["taxonomy_sha256"], "test-fingerprint")
         self.assertEqual(log["cves"]["CVE-TEST-1"]["rationale"], "Why CVE-TEST-1")
         self.assertEqual(log["cves"]["CVE-TEST-1"]["sources"], ["https://source.test"])
+        self.assertEqual(
+            log["cves"]["CVE-TEST-1"]["reference_focus"],
+            {
+                "https://source.test": {
+                    "original_chars": 100_000,
+                    "focused_chars": 4_000,
+                }
+            },
+        )
 
     def test_benchmark_log_and_scores_cover_only_requested_subset(self):
         benchmark = make_benchmark({
