@@ -12,6 +12,7 @@ from Graph.reporting import (
     concise_exception,
     configure_console,
     get_logger,
+    render_benchmark_results,
     render_runtime_config,
     report_error,
     report_warning,
@@ -250,6 +251,53 @@ class ReportingTests(unittest.TestCase):
         self.assertNotIn("chat-password", table)
         self.assertNotIn("api_key", table)
         self.assertNotIn("token=hidden", table)
+
+    def test_benchmark_table_compares_labels_and_shows_scores_and_coverage(self):
+        table = render_benchmark_results(
+            {
+                "CVE-2024-0001": {
+                    "status": "success",
+                    "expected_labels": ["XSS", "SQLi"],
+                    "classification_output": ["XSS"],
+                    "individual_scores": {
+                        "accuracy": 0.0,
+                        "precision": 1.0,
+                        "recall": 0.5,
+                        "f1": 2 / 3,
+                    },
+                },
+                "CVE-2024-0002": {
+                    "status": "error",
+                    "expected_labels": ["SQLi"],
+                    "classification_output": ["ERROR"],
+                },
+            },
+            {
+                "accuracy": 0.0,
+                "precision": 1.0,
+                "recall": 0.5,
+                "f1": 2 / 3,
+                "total": 2,
+                "scored": 1,
+                "successful": 1,
+                "degraded": 0,
+                "failed": 1,
+                "complete": False,
+            },
+        )
+
+        self.assertIn("Benchmark results", table)
+        self.assertIn("Expected labels", table)
+        self.assertIn("Predicted labels", table)
+        self.assertIn("XSS, SQLi", table)
+        self.assertIn("ERROR", table)
+        self.assertIn("AGGREGATE", table)
+        self.assertIn("1/2 scored", table)
+        self.assertIn("1.000", table)
+        self.assertIn("0.500", table)
+        self.assertIn("0.667", table)
+        self.assertIn("failed=1", table)
+        self.assertIn("complete=no", table)
 
     def test_project_logger_children_share_the_configured_handler(self):
         stream = io.StringIO()

@@ -94,6 +94,8 @@ Benchmark entries preserve expected labels, rationales, sources, individual scor
 
 Metrics now include exact-match accuracy together with micro precision, recall, and F1. Coverage reports `total`, `scored`, `successful`, `degraded`, `failed`, and `complete`. Successful and degraded results are scored; terminal errors are excluded and make coverage incomplete.
 
+At benchmark completion, the CLI prints a progress-safe aligned table in requested CVE order. Each row contains the status, expected labels, predicted labels, exact-match accuracy, precision, recall, and F1. An aggregate row and a coverage line follow. Terminal failures remain visible with `—` for unavailable scores. Classification-only runs do not print this table.
+
 ## HTTP 502 investigation and failure attribution
 
 The reported failure was an HTTP 502 containing an HTML gateway page. It did not recur in the subsequent one-CVE or ten-CVE debugger runs, so the upstream service responsible for that particular response could not be proven from the truncated original output.
@@ -218,7 +220,7 @@ Small inputs can still have long model latency, as shown by the 18.13-second bas
 
 The final offline checks completed without live requests:
 
-- 87 `unittest` tests passed;
+- 88 `unittest` tests passed;
 - Python compilation passed for `src` and `tests`;
 - `uv lock --check` passed;
 - `uv pip check` found the environment compatible;
@@ -244,4 +246,3 @@ The work was divided into cohesive commits:
 | `f41f0f5` | Attribute query-embedding gateway failures to CVE runs and improve safe diagnostics. |
 | `13e717e` | Add per-CVE pipeline stage timings. |
 | `980ad6c` | Focus broad multi-CVE indexes before embedding and record focus metadata. |
-

@@ -41,6 +41,7 @@ from Graph.request_pacing import MinimumIntervalPacer
 from Graph.reporting import (
     configure_console,
     get_logger,
+    render_benchmark_results,
     render_runtime_config,
     report_error,
 )
@@ -220,6 +221,10 @@ def _run_cases(
             }
         )
         _write_log(output_file, log)
+        LOGGER.info(
+            "\n%s",
+            render_benchmark_results(log["cves"], log["aggregated_scores"]),
+        )
 
     LOGGER.info(
         "%s Completed: successful=%s degraded=%s failed=%s file=%s",

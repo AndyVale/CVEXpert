@@ -425,6 +425,12 @@ class RunnerTests(unittest.TestCase):
             "CVE-2024-0003": {"cve_labels": ["XSS"]},
             "CVE-2024-0002": {"cve_labels": ["XSS"]},
         })
+        stream = io.StringIO()
+        CVE_expert_seq.configure_console(
+            verbose=False,
+            stream=stream,
+            use_color=False,
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             CVE_expert_seq.run_evaluation(
@@ -439,6 +445,12 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(log["aggregated_scores"]["scored"], 2)
         self.assertEqual(log["aggregated_scores"]["accuracy"], 0.5)
         self.assertEqual(log["cves"]["CVE-2024-0002"]["individual_scores"]["accuracy"], 0.0)
+        output = stream.getvalue()
+        self.assertIn("Benchmark results", output)
+        self.assertIn("CVE-2024-0003", output)
+        self.assertIn("Expected labels", output)
+        self.assertIn("Predicted labels", output)
+        self.assertIn("0.500", output)
 
     def test_run_reports_degraded_and_terminal_error_coverage(self):
         test_cves = {
@@ -523,6 +535,12 @@ class RunnerTests(unittest.TestCase):
         pipeline = FakePipeline({
             "CVE-2024-0001": {"nvd_description": "Description", "cve_labels": ["XSS"]}
         })
+        stream = io.StringIO()
+        CVE_expert_seq.configure_console(
+            verbose=False,
+            stream=stream,
+            use_color=False,
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_config = make_runtime_config(temp_dir)
             first = CVE_expert_seq.run_classification(
@@ -546,6 +564,7 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(entry["classification_output"], ["XSS"])
             self.assertNotIn("expected_labels", entry)
             self.assertNotIn("individual_scores", entry)
+        self.assertNotIn("Benchmark results", stream.getvalue())
 
     def test_runner_rejects_mismatched_benchmark_before_writing_log(self):
         wrong = replace(

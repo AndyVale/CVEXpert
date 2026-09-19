@@ -18,6 +18,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Live `RunnableSequence` runs now persist per-CVE stage timings without storing prompt or response content.
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
+- Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
 
 ## Durable user decisions
 
@@ -49,6 +50,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 24. The three 50-case expected-classification JSON files are the configured benchmark annotations. Their rationales and source lists are provenance, not runtime instructions; validate their canonical taxonomy fingerprints before evaluation.
 25. `[fixtures].taxonomy_file` is required; `[fixtures].expected_classification_file` is optional and loaded only with `--benchmark`. Positional CVE IDs are always required. With `--benchmark`, each requested ID must have an expected case; unrequested cases are ignored and the requested subset is scored in CLI order.
 26. `[classification].max_input_tokens` is an approximate rendered prompt and schema budget, estimated as `ceil(1.2 × UTF-8 bytes ÷ 3)`. The tracked example uses 12,000; provider tokenization may differ.
+27. `--benchmark` should finish with a console table that makes each requested CVE's expected and predicted labels, per-CVE scores, aggregate scores, and coverage directly visible. Terminal failures stay in the table with unavailable metrics rather than being omitted.
 
 ## Repository understanding
 
@@ -596,6 +598,12 @@ These are proposals, not authorization to edit production code:
 - `CVE-2016-9079` remains the dominant case at about 87.2 seconds because its eight target-specific sources generated 194 chunks; the broad-index rule intentionally does not change those pages. Persistent caching, embedding reuse, and bounded reference work remain higher-value follow-up options.
 - The change passed all 87 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks.
 - Added `IMPLEMENTATION_REPORT.md` as the detailed user-requested record of the full JSON migration and debugger investigation. It contains no credentials or endpoint values and notes that `.vscode/launch.json` remains ignored and uncommitted.
+
+### 2026-09-19 — Benchmark score table
+
+- Benchmark completion now prints one progress-safe aligned table in normal and verbose modes. Rows preserve requested CVE order and show status, expected labels, predicted labels, exact-match accuracy, micro precision, micro recall, and micro F1.
+- The final row shows aggregate metrics. A coverage line shows successful, degraded, failed, scored/total, and completeness values. Terminal failures remain visible with `—` score cells; classification-only runs do not print the table.
+- All 88 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks passed. No live service calls were needed for this output-only change.
 
 ## Notes maintenance checklist
 
