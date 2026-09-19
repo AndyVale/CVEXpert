@@ -15,6 +15,7 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 ## Repository map
 
 - `README.md`: user-facing setup, configuration, execution, architecture, and verification guidance.
+- `IMPLEMENTATION_REPORT.md`: detailed JSON-fixture migration, debugger investigation, timing evidence, and remaining bottlenecks.
 - `pyproject.toml`: authoritative project metadata, Python range, and direct dependencies. The project is deliberately non-packaged (`tool.uv.package = false`) while its entry points remain scripts.
 - `uv.lock`: committed complete dependency resolution. `requirements.txt` has been removed.
 - `config.example.toml`: the only tracked configuration file; a provider-neutral template with credential placeholders.

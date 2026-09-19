@@ -99,3 +99,5 @@ uv lock --check
 uv pip check
 git diff --check
 ```
+
+See [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) for the complete JSON-fixture migration, live debugger investigation, timing results, and remaining bottlenecks.

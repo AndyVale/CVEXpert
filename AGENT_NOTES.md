@@ -17,6 +17,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - The filter now fetches its shared query embedding during CVE processing so an upstream failure is attributed to one CVE; console errors retain stage context even for HTML gateway responses.
 - Live `RunnableSequence` runs now persist per-CVE stage timings without storing prompt or response content.
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
+- `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 
 ## Durable user decisions
 
@@ -594,6 +595,7 @@ These are proposals, not authorization to edit production code:
 - A full live rerun of the first ten flat cases under `debugpy` took about 204.6 seconds versus 264.5 seconds in the preceding profile, a 22.6% reduction. It again completed with 6 success, 4 degraded, 0 terminal errors, unchanged predictions, and 0.9 exact-match accuracy/micro precision/recall/F1. Service timing and scraped-page availability vary, so this is an end-to-end observation rather than a controlled microbenchmark.
 - `CVE-2016-9079` remains the dominant case at about 87.2 seconds because its eight target-specific sources generated 194 chunks; the broad-index rule intentionally does not change those pages. Persistent caching, embedding reuse, and bounded reference work remain higher-value follow-up options.
 - The change passed all 87 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks.
+- Added `IMPLEMENTATION_REPORT.md` as the detailed user-requested record of the full JSON migration and debugger investigation. It contains no credentials or endpoint values and notes that `.vscode/launch.json` remains ignored and uncommitted.
 
 ## Notes maintenance checklist
 
