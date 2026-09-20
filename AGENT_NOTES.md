@@ -19,7 +19,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 - Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
-- Reliability hardening implementation is complete through atomic schema-versioned artifacts. Static verification and authorized live one-CVE/ten-CVE validation remain before final handoff.
+- The reliability hardening tranche is complete. Static verification and the authorized hierarchical one-CVE and ten-CVE live validations passed; no code-caused live defect remains open.
 
 ## Durable user decisions
 
@@ -662,6 +662,14 @@ These are proposals, not authorization to edit production code:
 - Checkpoints are serialized to a same-directory temporary file, flushed, `fsync`ed, and atomically replaced. Failed serialization removes the temporary file and leaves the preceding checkpoint parseable.
 - README, tracked configuration comments, implementation report, and repository guidance now describe the active reliability behavior and explicitly deferred caching/provenance/concurrency work.
 - The completed implementation passes 116 offline tests plus compilation, lock consistency, installed dependency consistency, and whitespace checks before live validation.
+
+### 2026-09-20 — Reliability live validation
+
+- Confirmed the ignored local configuration selects the 39-label hierarchical taxonomy, not the debugger profile's historical “flat” name. The one-CVE classification of `CVE-2021-27103` completed successfully as `SSRF` in 3.08 seconds with no warnings, retries, or repairs.
+- The exact authorized ten-CVE artifact `RUN_0_20260920T153302856729Z_5de5c547.json` completed in 200.844 seconds with 7 success, 3 degraded, 0 error, complete 10/10 coverage, and 0.9 exact-match accuracy/micro precision/recall/F1. `CVE-2020-14864` remained the known sole mismatch.
+- The benchmark recorded 183 external attempts, one successful NVD transport retry, no repairs, and 546,067 audited tokens. All seven warnings were recoverable reference outcomes: four permanent HTTP 403 responses and three extraction `ValueError`s. No code-caused terminal failure occurred.
+- Maximum per-CVE use was 38/100 requests and 189,870/250,000 tokens; run totals were 183/5,000 requests and 546,067/10,000,000 tokens. Audit records contained no prompt, response, credential, authorization, or raw-exception fields.
+- The final artifact was complete, parseable, atomically closed, and recorded a clean Git revision. The pre-existing `logs/RUN_0.json` retained SHA-256 `4f039469f7839485a40f7baf61ea1a97424aa810ca156b8e993dd926b45402a9` and was not modified.
 
 ## Notes maintenance checklist
 

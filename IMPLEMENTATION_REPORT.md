@@ -230,6 +230,20 @@ Artifact schema version 1 uses unique benchmark and classification filenames, UU
 
 This tranche deliberately does not add persistent caching/resume, source-excerpt provenance, hierarchy-aware label routing, embedding batching, concurrency, content-addressed bodies, or dormant-code cleanup.
 
+### Reliability live validation
+
+The ignored local configuration selected `Hierarchical Vulnerability Mechanisms` with 39 labels, despite the debugger profile's historical “flat” name. No local endpoint, credential, taxonomy, or run-number setting was changed.
+
+The classification-only validation for `CVE-2021-27103` completed successfully in 3.08 seconds with `SSRF`, no warnings, six external attempts, no retry or repair, and 3,615 audited tokens. Its schema-versioned artifact was complete and parseable, contained provider plus estimated usage records, contained no prompt/response/credential audit fields, and left no temporary file.
+
+The requested ten-CVE benchmark wrote `RUN_0_20260920T153302856729Z_5de5c547.json` and completed in 200.844 seconds with 7 successful, 3 degraded, and 0 terminal results. All ten cases were scored; exact-match accuracy and micro precision, recall, and F1 were each 0.9. `CVE-2020-14864` remained the sole mismatch (`PathTraversal` expected, `ImproperAuthorization` predicted), consistent with the earlier thin-evidence finding.
+
+The benchmark recorded 183 external attempts, one retry, no structured repairs, and 546,067 audited tokens; 81 records used estimates because provider usage was unavailable. The single retry was an NVD transport failure for `CVE-2021-27104`; it waited 0.621 seconds and succeeded on attempt two. The seven degraded warnings were all reference acquisition outcomes: four permanent HTTP 403 responses and three extraction `ValueError`s. Maximum per-CVE usage was 38 requests and 189,870 tokens, below the configured 100-request and 250,000-token ceilings. The run used 183/5,000 requests and 546,067/10,000,000 tokens.
+
+The artifact contained 37 provider request IDs; the configured providers returned no whitelisted rate-limit headers. Audit records contained no prompt, response, API-key, authorization, or raw-exception fields. The final checkpoint had completion metadata, Git `dirty: false`, no abandoned temporary file, and complete benchmark coverage. The pre-existing `logs/RUN_0.json` remained byte-for-byte unchanged at SHA-256 `4f039469f7839485a40f7baf61ea1a97424aa810ca156b8e993dd926b45402a9`.
+
+No terminal result or code-caused live defect required a corrective commit or targeted rerun.
+
 ## Verification
 
 The final offline checks completed without live requests:
