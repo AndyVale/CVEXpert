@@ -79,6 +79,15 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.references.max_pages, 7)
         self.assertEqual(settings.evaluation.run_number, 3)
         self.assertEqual(settings.classification.max_input_tokens, 12000)
+        self.assertEqual(settings.embedding.max_attempts, 3)
+        self.assertEqual(settings.chat.read_timeout_seconds, 60.0)
+        self.assertEqual(settings.nvd.connect_timeout_seconds, 5.0)
+        self.assertEqual(settings.references.max_bytes_per_reference, 5 * 1024 * 1024)
+        self.assertEqual(settings.semantic_chunker.max_chunks_per_cve, 1024)
+        self.assertEqual(settings.summarization.max_output_tokens, 768)
+        self.assertEqual(settings.classification.structured_repair_attempts, 1)
+        self.assertEqual(settings.resilience.max_retry_after_seconds, 30.0)
+        self.assertEqual(settings.budgets.max_requests_per_cve, 100)
         self.assertEqual(
             settings.fixtures.resolved_taxonomy_file(),
             config.REPOSITORY_ROOT / "fixtures/flat/taxonomy.json",
@@ -218,6 +227,9 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertFalse(example["embedding"]["check_embedding_ctx_length"])
         self.assertEqual(example["fixtures"]["taxonomy_file"], "fixtures/flat/taxonomy.json")
         self.assertEqual(example["classification"]["max_input_tokens"], 12000)
+        self.assertEqual(example["budgets"]["max_requests_per_cve"], 100)
+        self.assertEqual(example["references"]["max_redirects"], 5)
+        self.assertEqual(example["summarization"]["max_output_tokens"], 768)
 
     def test_default_config_path_is_anchored_to_repository_root(self):
         expected_root = Path(config.__file__).resolve().parents[2]

@@ -10,6 +10,7 @@ dependencies = [
     "langchain-experimental>=0.4,<0.5",
     "langchain-openai>=1.4,<2",
     "langchain-text-splitters>=1.1,<2",
+    "httpx>=0.28,<1",
     "numpy>=2,<3",
     "openai>=3,<4",
     "requests>=2.32,<3",

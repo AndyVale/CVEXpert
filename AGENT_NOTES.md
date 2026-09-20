@@ -4,7 +4,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 
 ## Current status
 
-- Last updated: 2026-09-19 (Europe/Rome)
+- Last updated: 2026-09-20 (Europe/Rome)
 - Active branch: `main`
 - Linear code snapshot includes the direct-TOML credential migration documented in the 2026-08-30 work log below.
 - Graph branch snapshot reviewed for comparison: `graphCVExpert` at `411baf6`
@@ -19,6 +19,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 - Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
+- Reliability hardening is in progress. The first unit adds backward-compatible timeout/retry/budget defaults, repository-owned retry classification, monotonic request/token/time ledgers, request audit aggregation, and direct `httpx` metadata.
 
 ## Durable user decisions
 
@@ -477,6 +478,14 @@ These are proposals, not authorization to edit production code:
 - What minimum evidence format is required for a label to be accepted: source ID, quote/span, URL, confidence, or all of these?
 
 ## Work log
+
+### 2026-09-20 — Reliability foundation
+
+- Added optional validated defaults for service timeouts, retry attempts, content/chunk/model limits, and CVE/run request-token-time budgets without requiring changes to ignored local configuration.
+- Added shared execution-context, budget, retry, `Retry-After`, jitter, and audit primitives. SDK retry disabling and stage integration follow in the subsequent reliability units.
+- Minimum-interval pacing now reports its wait duration for request telemetry.
+- Declared the already-transitive `httpx` package as a direct dependency because production code will construct component-level model timeouts.
+- The complete offline suite passes with 94 tests; compilation, lock validation, installed dependency checks, and whitespace checks pass.
 
 ### 2026-08-29 — Initial exploration and review
 

@@ -33,16 +33,19 @@ class MinimumIntervalPacer:
         self._lock = Lock()
         self._last_request_started_at: float | None = None
 
-    def __call__(self, _request: Any = None) -> None:
-        """Wait as needed before allowing the next HTTP request to start."""
+    def __call__(self, _request: Any = None) -> float:
+        """Wait as needed and return the number of seconds spent pacing."""
 
         with self._lock:
+            waited = 0.0
             now = self._clock()
             if self._last_request_started_at is not None:
                 elapsed = now - self._last_request_started_at
                 remaining = self.minimum_interval_seconds - elapsed
                 if remaining > 0:
                     self._sleep(remaining)
+                    waited = remaining
                     now = self._clock()
 
             self._last_request_started_at = now
+            return waited

@@ -11,6 +11,10 @@ summarizer_model = "your-summarizer-model"
 summarizer_temperature = 0.0
 # Minimum interval between outbound HTTP attempts. Use slightly more than 60 / RPM.
 request_delay_seconds = 0.0
+connect_timeout_seconds = 10.0
+read_timeout_seconds = 60.0
+write_timeout_seconds = 60.0
+pool_timeout_seconds = 10.0
 
 [embedding]
 base_url = "http://localhost:8001/v1"
@@ -20,19 +24,44 @@ model = "your-embedding-model"
 check_embedding_ctx_length = false
 # Minimum interval between outbound HTTP attempts. Use slightly more than 60 / RPM.
 request_delay_seconds = 0.0
+max_attempts = 3
+connect_timeout_seconds = 10.0
+read_timeout_seconds = 60.0
+write_timeout_seconds = 60.0
+pool_timeout_seconds = 10.0
 
 [nvd]
 base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 timeout_seconds = 20
+connect_timeout_seconds = 5.0
+max_attempts = 3
+# Optional for deployments with an NVD API key.
+# api_key = "replace-with-nvd-api-key"
 # Keyless NVD access allows five requests per rolling 30 seconds; add headroom.
 request_delay_seconds = 6.1
 
 [references]
 max_pages = 10
+max_attempts = 3
+connect_timeout_seconds = 10.0
+read_timeout_seconds = 30.0
+max_redirects = 5
+max_bytes_per_reference = 5242880
+max_bytes_per_cve = 20971520
+max_extracted_chars_per_reference = 500000
+max_extracted_chars_per_cve = 2000000
 
 [semantic_chunker]
 breakpoint_threshold_type = "percentile"
 breakpoint_threshold_amount = 25.0
+max_chunks_per_reference = 256
+max_chunks_per_cve = 1024
+
+[summarization]
+max_attempts = 3
+structured_repair_attempts = 1
+max_input_tokens = 12000
+max_output_tokens = 768
 
 [cosine_filter]
 query = "What type of vulnerability is it?"
@@ -46,6 +75,22 @@ expected_classification_file = "fixtures/flat/expected-classification.json"
 [classification]
 # Approximate maximum input tokens for each classifier model call.
 max_input_tokens = 12000
+max_attempts = 3
+structured_repair_attempts = 1
+max_output_tokens = 512
+
+[resilience]
+initial_backoff_seconds = 1.0
+max_backoff_seconds = 30.0
+max_retry_after_seconds = 30.0
+
+[budgets]
+max_requests_per_cve = 100
+max_tokens_per_cve = 250000
+max_cve_seconds = 600.0
+max_requests_per_run = 5000
+max_tokens_per_run = 10000000
+max_run_seconds = 21600.0
 
 [evaluation]
 log_directory = "logs"
