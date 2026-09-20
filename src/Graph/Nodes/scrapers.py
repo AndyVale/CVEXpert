@@ -10,8 +10,8 @@ import requests
 import trafilatura
 from tqdm import tqdm
 
-from Graph.audit import request_scope
-from Graph.errors import make_pipeline_warning
+from Graph.audit import BudgetExceeded, request_scope
+from Graph.errors import PipelineStageError, make_pipeline_warning
 from Graph.reporting import get_logger, report_warning
 from Graph.resilience import RetryPolicy, execute_with_retry
 from Graph.state import CVEClassifierState
@@ -210,6 +210,18 @@ def extract_md_trafilatura(
                 )
             pages_dict[url_ref] = text
             extracted_chars += len(text)
+        except BudgetExceeded as error:
+            raise PipelineStageError(
+                stage="scrape",
+                cve_id=state["cve_id"],
+                error=error,
+                safe_message="Reference acquisition budget exhausted",
+                partial_state={
+                    **state,
+                    "nvd_references_pages": pages_dict,
+                    "pipeline_warnings": warnings,
+                },
+            ) from error
         except Exception as error:
             _append_warning(
                 warnings,

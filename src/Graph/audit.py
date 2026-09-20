@@ -55,13 +55,30 @@ class _BudgetCounter:
 
     def reserve_request(self, scope: str, estimated_tokens: int) -> None:
         with self._lock:
-            self.check_time(scope)
-            if self.requests + 1 > self.caps.max_requests:
-                raise BudgetExceeded(scope, "request")
-            if self.tokens + estimated_tokens > self.caps.max_tokens:
-                raise BudgetExceeded(scope, "token")
+            self._check_reservation(scope, estimated_tokens)
             self.requests += 1
             self.tokens += estimated_tokens
+
+    def _check_reservation(self, scope: str, estimated_tokens: int) -> None:
+        self.check_time(scope)
+        if self.requests + 1 > self.caps.max_requests:
+            raise BudgetExceeded(scope, "request")
+        if self.tokens + estimated_tokens > self.caps.max_tokens:
+            raise BudgetExceeded(scope, "token")
+
+    def check_reservation(self, scope: str, estimated_tokens: int) -> None:
+        with self._lock:
+            self._check_reservation(scope, estimated_tokens)
+
+    def check_available(self, scope: str) -> None:
+        """Fail before starting another unit when no request/token capacity remains."""
+
+        with self._lock:
+            self.check_time(scope)
+            if self.requests >= self.caps.max_requests:
+                raise BudgetExceeded(scope, "request")
+            if self.tokens >= self.caps.max_tokens:
+                raise BudgetExceeded(scope, "token")
 
     def reconcile_tokens(self, scope: str, estimated: int, actual: int) -> None:
         with self._lock:
@@ -120,12 +137,10 @@ class ExecutionContext:
         self.cve_counter.check_time("CVE")
 
     def authorize_request(self, estimated_tokens: int = 0) -> None:
+        self.run_budget.counter.check_reservation("run", estimated_tokens)
+        self.cve_counter.check_reservation("CVE", estimated_tokens)
         self.run_budget.counter.reserve_request("run", estimated_tokens)
-        try:
-            self.cve_counter.reserve_request("CVE", estimated_tokens)
-        except Exception:
-            # Keep the shared run ledger conservative when a CVE cap rejects work.
-            raise
+        self.cve_counter.reserve_request("CVE", estimated_tokens)
 
     def reconcile_tokens(self, estimated: int, actual: int) -> None:
         self.run_budget.counter.reconcile_tokens("run", estimated, actual)
@@ -141,44 +156,61 @@ class ExecutionContext:
         }
 
     def aggregate(self) -> dict[str, Any]:
-        totals: dict[str, Any] = {
-            "requests": len(self.records),
-            "retries": sum(1 for record in self.records if record.get("attempt", 1) > 1),
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "estimated_token_records": 0,
-            "pacing_seconds": 0.0,
-            "retry_delay_seconds": 0.0,
-            "latency_seconds": 0.0,
-            "by_stage": {},
-        }
-        for record in self.records:
-            stage = str(record.get("stage", "unknown"))
-            stage_totals = totals["by_stage"].setdefault(
-                stage,
-                {"requests": 0, "retries": 0, "tokens": 0, "latency_seconds": 0.0},
-            )
-            stage_totals["requests"] += 1
-            if record.get("attempt", 1) > 1:
-                stage_totals["retries"] += 1
-            for key in ("input_tokens", "output_tokens", "total_tokens"):
-                value = int(record.get(key) or 0)
-                totals[key] += value
-                if key == "total_tokens":
-                    stage_totals["tokens"] += value
-            if record.get("token_usage_source") == "estimate":
-                totals["estimated_token_records"] += 1
-            for key in ("pacing_seconds", "retry_delay_seconds", "latency_seconds"):
-                value = float(record.get(key) or 0.0)
-                totals[key] += value
-                if key == "latency_seconds":
-                    stage_totals["latency_seconds"] += value
+        return aggregate_request_records(self.records)
+
+
+def aggregate_request_records(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate a CVE or run list of safe request audit records."""
+
+    totals: dict[str, Any] = {
+        "requests": len(records),
+        "retries": sum(1 for record in records if record.get("attempt", 1) > 1),
+        "repairs": sum(
+            1 for record in records if str(record.get("operation", "")).endswith("_repair")
+        ),
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "estimated_token_records": 0,
+        "pacing_seconds": 0.0,
+        "retry_delay_seconds": 0.0,
+        "latency_seconds": 0.0,
+        "by_stage": {},
+    }
+    for record in records:
+        stage = str(record.get("stage", "unknown"))
+        stage_totals = totals["by_stage"].setdefault(
+            stage,
+            {
+                "requests": 0,
+                "retries": 0,
+                "repairs": 0,
+                "tokens": 0,
+                "latency_seconds": 0.0,
+            },
+        )
+        stage_totals["requests"] += 1
+        if record.get("attempt", 1) > 1:
+            stage_totals["retries"] += 1
+        if str(record.get("operation", "")).endswith("_repair"):
+            stage_totals["repairs"] += 1
+        for key in ("input_tokens", "output_tokens", "total_tokens"):
+            value = int(record.get(key) or 0)
+            totals[key] += value
+            if key == "total_tokens":
+                stage_totals["tokens"] += value
+        if record.get("token_usage_source") == "estimate":
+            totals["estimated_token_records"] += 1
         for key in ("pacing_seconds", "retry_delay_seconds", "latency_seconds"):
-            totals[key] = round(totals[key], 3)
-        for values in totals["by_stage"].values():
-            values["latency_seconds"] = round(values["latency_seconds"], 3)
-        return totals
+            value = float(record.get(key) or 0.0)
+            totals[key] += value
+            if key == "latency_seconds":
+                stage_totals["latency_seconds"] += value
+    for key in ("pacing_seconds", "retry_delay_seconds", "latency_seconds"):
+        totals[key] = round(totals[key], 3)
+    for values in totals["by_stage"].values():
+        values["latency_seconds"] = round(values["latency_seconds"], 3)
+    return totals
 
 
 _CURRENT_CONTEXT: ContextVar[ExecutionContext | None] = ContextVar(
@@ -230,6 +262,7 @@ def mark_last_request_invalid(error_category: str) -> None:
     if record.get("status") == "success":
         record["status"] = "invalid_output"
         record["error_category"] = error_category
+        record["result_category"] = error_category
 
 
 def utc_now() -> str:

@@ -99,6 +99,64 @@ class RetryTests(unittest.TestCase):
             )
         self.assertEqual(calls, 1)
 
+    def test_retry_delay_is_cancelled_when_deadline_is_too_close(self):
+        clock = FakeClock()
+        run = RunBudget.create(BudgetCaps(20, 20_000, 100), clock=clock)
+        context = ExecutionContext.create(
+            "CVE-2024-0001", BudgetCaps(10, 10_000, 1.5), run, clock=clock
+        )
+        calls = 0
+
+        def operation():
+            nonlocal calls
+            calls += 1
+            raise ResponseError(503)
+
+        with bind_execution_context(context), self.assertRaises(ResponseError):
+            execute_with_retry(
+                operation,
+                policy=RetryPolicy(max_attempts=3, initial_backoff_seconds=2),
+                sleep=clock.sleep,
+                clock=clock,
+                random_uniform=lambda _low, high: high,
+            )
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(
+            context.records[0]["error_category"],
+            "retry_delay_exceeds_deadline",
+        )
+
+    def test_pacing_wait_and_retry_after_are_recorded_separately(self):
+        clock = FakeClock()
+        context = self._context(clock)
+        responses = [ResponseError(429, {"Retry-After": "2"}), "ok"]
+
+        def operation():
+            response = responses.pop(0)
+            if isinstance(response, BaseException):
+                raise response
+            return response
+
+        def pace():
+            clock.sleep(0.25)
+            return 0.25
+
+        with bind_execution_context(context):
+            execute_with_retry(
+                operation,
+                policy=RetryPolicy(max_attempts=3),
+                pacer=pace,
+                sleep=clock.sleep,
+                clock=clock,
+                random_uniform=lambda _low, _high: 0.0,
+            )
+
+        self.assertEqual(context.records[0]["pacing_seconds"], 0.25)
+        self.assertEqual(context.records[0]["retry_delay_seconds"], 2.0)
+        self.assertEqual(context.records[1]["pacing_seconds"], 0.25)
+        self.assertEqual(context.aggregate()["pacing_seconds"], 0.5)
+
     def test_error_classification_distinguishes_transient_and_permanent(self):
         self.assertEqual(classify_error(ResponseError(500)), ("http_500", True))
         self.assertEqual(classify_error(ResponseError(404)), ("http_404", False))

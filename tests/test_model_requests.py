@@ -112,6 +112,7 @@ class StructuredRequestTests(unittest.TestCase):
         self.assertEqual(context.records[1]["provider_request_id"], "request-123")
         self.assertEqual(context.records[1]["token_usage_source"], "provider")
         self.assertEqual(context.records[1]["input_tokens"], 11)
+        self.assertEqual(context.aggregate()["repairs"], 1)
         self.assertEqual(
             context.records[1]["rate_limits"],
             {"x-ratelimit-remaining-requests": "42"},

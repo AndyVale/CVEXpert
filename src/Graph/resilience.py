@@ -157,8 +157,10 @@ def execute_with_retry(
 
     for attempt in range(1, policy.max_attempts + 1):
         if context is not None:
-            context.authorize_request(estimated_total)
+            context.check_time()
         pacing_seconds = pacer() if pacer is not None else 0.0
+        if context is not None:
+            context.authorize_request(estimated_total)
         started_at = utc_now()
         started = clock()
         try:
@@ -182,10 +184,12 @@ def execute_with_retry(
                         **scope,
                         "attempt": attempt,
                         "started_at": started_at,
+                        "completed_at": utc_now(),
                         "latency_seconds": round(clock() - started, 3),
                         "pacing_seconds": round(pacing_seconds, 3),
                         "retry_delay_seconds": 0.0,
                         "status": "success",
+                        "result_category": "success",
                         "error_category": None,
                         "http_status": status,
                         "provider_request_id": request_id,
@@ -224,10 +228,12 @@ def execute_with_retry(
                         **scope,
                         "attempt": attempt,
                         "started_at": started_at,
+                        "completed_at": utc_now(),
                         "latency_seconds": round(clock() - started, 3),
                         "pacing_seconds": round(pacing_seconds, 3),
                         "retry_delay_seconds": round(delay, 3),
                         "status": "retrying" if will_retry else "error",
+                        "result_category": category,
                         "error_category": category,
                         "http_status": status,
                         "provider_request_id": request_id,

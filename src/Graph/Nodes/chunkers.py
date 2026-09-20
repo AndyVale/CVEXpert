@@ -1,8 +1,8 @@
 from tqdm import tqdm
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
-from Graph.errors import make_pipeline_warning
-from Graph.audit import request_scope
+from Graph.errors import PipelineStageError, make_pipeline_warning
+from Graph.audit import BudgetExceeded, request_scope
 from Graph.reporting import get_logger, report_warning
 from Graph.reference_focus import focus_broad_cve_reference
 from Graph.state import CVEClassifierState
@@ -261,7 +261,9 @@ class SemanticChunkerNode:
                 "reference_focus": {},
             }
 
-        for url, text in tqdm(pages.items(), "Semantic chunking pages"):
+        for reference_index, (url, text) in enumerate(
+            tqdm(pages.items(), "Semantic chunking pages"), start=1
+        ):
             if not text or not text.strip():
                 continue
 
@@ -282,7 +284,7 @@ class SemanticChunkerNode:
                 with request_scope(
                     stage="chunk",
                     operation="embed_documents",
-                    source=url,
+                    source=f"reference-{reference_index:03d}",
                     model=getattr(self.embed_model, "model_name", None),
                 ):
                     chunks = self.splitter.split_text(focused_text)
@@ -314,6 +316,19 @@ class SemanticChunkerNode:
                     report_warning(LOGGER, warning, ValueError("Semantic chunk limit exceeded"))
                 chunks_dict[url] = chunks
                 total_chunks += len(chunks)
+            except BudgetExceeded as error:
+                raise PipelineStageError(
+                    stage="chunk",
+                    cve_id=state["cve_id"],
+                    error=error,
+                    safe_message="Semantic chunking budget exhausted",
+                    partial_state={
+                        **state,
+                        "nvd_references_chunks": chunks_dict,
+                        "reference_focus": focus_metadata,
+                        "pipeline_warnings": warnings,
+                    },
+                ) from error
             except Exception as error:
                 chunks_dict[url] = []
                 warning = make_pipeline_warning(

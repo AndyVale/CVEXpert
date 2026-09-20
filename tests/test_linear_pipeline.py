@@ -10,6 +10,7 @@ from unittest.mock import patch
 from langchain_core.runnables import RunnableLambda
 
 from Definitions.config import (
+    BudgetSettings,
     ChatSettings,
     ClassificationSettings,
     CosineFilterSettings,
@@ -22,10 +23,12 @@ from Definitions.config import (
     SemanticChunkerSettings,
 )
 from Definitions.fixtures import Benchmark, BenchmarkCase, Taxonomy, TaxonomyLabel
+from Graph.audit import request_scope
 from Graph.errors import PipelineStageError
 from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_scores
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.util import StateFromFileLoader
+from Graph.resilience import RetryPolicy, execute_with_retry
 
 import CVE_expert_seq
 
@@ -109,6 +112,28 @@ class FakePipeline:
         if isinstance(result, BaseException):
             raise result
         return {"cve_id": cve_id, **result}
+
+
+class RequestingPipeline:
+    def __init__(self):
+        self.invocations = []
+
+    def invoke(self, state):
+        cve_id = state["cve_id"]
+        self.invocations.append(cve_id)
+        with request_scope(
+            stage="classify",
+            operation="test_request",
+            source="label-group-001",
+            model="test-model",
+        ):
+            execute_with_retry(
+                lambda: "ok",
+                policy=RetryPolicy(max_attempts=1),
+                estimated_input_tokens=5,
+                estimated_output_tokens=5,
+            )
+        return {"cve_id": cve_id, "cve_labels": ["XSS"]}
 
 
 class FakeEmbeddingsClient:
@@ -227,6 +252,68 @@ class StateLoaderTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_run_budget_stops_remaining_cases_without_pipeline_calls(self):
+        pipeline = RequestingPipeline()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_config = replace(
+                make_runtime_config(temp_dir),
+                budgets=BudgetSettings(
+                    max_requests_per_cve=10,
+                    max_tokens_per_cve=100,
+                    max_cve_seconds=100,
+                    max_requests_per_run=1,
+                    max_tokens_per_run=100,
+                    max_run_seconds=100,
+                ),
+            )
+            CVE_expert_seq.run_evaluation(
+                pipeline,
+                ["FakePipeline"],
+                runtime_config,
+                TEST_TAXONOMY,
+                make_benchmark({"CVE-ONE": ["XSS"], "CVE-TWO": ["XSS"]}),
+                run_number=0,
+            )
+            log = json.loads((Path(temp_dir) / "RUN_0.json").read_text())
+
+        self.assertEqual(pipeline.invocations, ["CVE-ONE"])
+        self.assertEqual(
+            log["cves"]["CVE-ONE"]["request_audit_summary"]["requests"], 1
+        )
+        self.assertEqual(log["cves"]["CVE-TWO"]["error"]["stage"], "budget")
+        self.assertEqual(log["cves"]["CVE-TWO"]["request_audit"], [])
+        self.assertEqual(log["request_audit_summary"]["requests"], 1)
+
+    def test_cve_token_budget_fails_before_external_attempt(self):
+        pipeline = RequestingPipeline()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_config = replace(
+                make_runtime_config(temp_dir),
+                budgets=BudgetSettings(
+                    max_requests_per_cve=10,
+                    max_tokens_per_cve=9,
+                    max_cve_seconds=100,
+                    max_requests_per_run=10,
+                    max_tokens_per_run=100,
+                    max_run_seconds=100,
+                ),
+            )
+            CVE_expert_seq.run_classification(
+                pipeline,
+                ["FakePipeline"],
+                runtime_config,
+                TEST_TAXONOMY,
+                ["CVE-2024-0001"],
+            )
+            output_path = next(Path(temp_dir).glob("CLASSIFY_*.json"))
+            entry = json.loads(output_path.read_text())["cves"]["CVE-2024-0001"]
+
+        self.assertEqual(entry["status"], "error")
+        self.assertEqual(entry["error"]["stage"], "budget")
+        self.assertIn("CVE token", entry["error"]["message"])
+        self.assertEqual(entry["request_audit"], [])
+        self.assertEqual(entry["budget_usage"]["requests"], 0)
+
     def test_real_sequence_logs_stage_timings_for_success_and_error(self):
         def pass_stage(state):
             return state
@@ -503,6 +590,10 @@ class RunnerTests(unittest.TestCase):
                     cve_id="CVE-ERROR",
                     error=TimeoutError("upstream details"),
                     safe_message="NVD request or response parsing failed",
+                    partial_state={
+                        "pipeline_warnings": [warning],
+                        "nvd_url_references": ["https://failed.example.test"],
+                    },
                 ),
             }
         )
@@ -534,6 +625,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(terminal_entry["classification_output"], ["ERROR"])
         self.assertEqual(terminal_entry["error"]["stage"], "nvd")
         self.assertIn("error_message", terminal_entry)
+        self.assertEqual(terminal_entry["pipeline_warnings"], [warning])
+        self.assertEqual(terminal_entry["partial_stage_counts"]["reference_urls"], 1)
+        self.assertEqual(terminal_entry["labels_motivation"], {})
+        self.assertEqual(terminal_entry["labels_confidence"], {})
         self.assertEqual(
             log["aggregated_scores"],
             {

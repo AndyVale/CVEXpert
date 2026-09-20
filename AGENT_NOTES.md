@@ -19,7 +19,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 - Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
-- Reliability hardening is in progress. Repository-owned retries and explicit model transports are active, acquisition and chunk/filter work is bounded, model inputs/outputs are capped, and malformed structured results receive one audited repair request. Runner-level budget binding, complete artifact telemetry, and atomic versioned persistence remain.
+- Reliability hardening is in progress. Repository-owned retries, explicit timeouts, bounded acquisition/model work, structured repair, live CVE/run budgets, and safe per-attempt telemetry are active. Atomic versioned artifact persistence and documentation/live validation remain.
 
 ## Durable user decisions
 
@@ -645,6 +645,14 @@ These are proposals, not authorization to edit production code:
 - Active summarizer and classifier calls retain raw structured-response metadata for auditing, validate parsed results, and make at most one bounded repair request containing the validation problem and prior output as delimited untrusted data. Exhausted summarizer repair degrades one reference; exhausted classifier repair remains terminal.
 - Scraped and classified evidence prompts now explicitly identify external content as untrusted and prohibit embedded instructions. Stable prompt/schema version constants were introduced for the forthcoming run metadata.
 - Provider token usage, request IDs, and whitelisted rate-limit headers are captured when exposed, with estimates retained otherwise; telemetry never stores prompts, responses, credentials, or raw exception text. All 109 offline tests and the complete static verification gate pass.
+
+### 2026-09-20 — Enforced execution budgets and request audit
+
+- Bound one shared monotonic run ledger and one monotonic CVE ledger around actual pipeline execution. Every repository-controlled NVD, redirect, reference, embedding, summary, repair, and classifier attempt reserves request capacity; model attempts also reserve conservative input plus maximum-output tokens and reconcile to provider usage when available.
+- CVE/run request, token, and wall-clock exhaustion is terminal. Run exhaustion prevents all untouched remaining CVEs from invoking the pipeline, while each receives an explicit budget error entry. Budget exhaustion is no longer accidentally degraded by reference or semantic-chunk recovery paths.
+- Each CVE artifact entry now includes content-free per-attempt audit records, aggregates by stage, and a CVE budget snapshot. Run-level aggregates include requests, retries, repairs, token source/usage, pacing, retry delay, latency, and shared budget use.
+- Terminal entries preserve accumulated warnings and small content-free partial-stage counts. Inactive motivation/confidence values now consistently serialize as `{}`, and monotonic per-CVE timing is named `duration_seconds`.
+- Added offline coverage for run short-circuiting, CVE token preflight, pacing versus retry delay, deadline-aware retry cancellation, provider versus estimated token usage, repair counts, safe headers/request IDs, and absence of prompt/response/secret material. All 113 offline tests and the full static gate pass.
 
 ## Notes maintenance checklist
 

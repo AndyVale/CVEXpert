@@ -39,6 +39,14 @@ from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_sc
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 from Graph.errors import PipelineStageError
+from Graph.audit import (
+    BudgetCaps,
+    BudgetExceeded,
+    ExecutionContext,
+    RunBudget,
+    aggregate_request_records,
+    bind_execution_context,
+)
 from Graph.model_requests import RepositoryRetryEmbeddings
 from Graph.request_pacing import MinimumIntervalPacer
 from Graph.resilience import RetryPolicy
@@ -58,6 +66,17 @@ LOGGER = get_logger("runner")
 def _serialize_pipeline_error(error, cve_id):
     if isinstance(error, PipelineStageError):
         return error.to_dict(), str(error)
+    if isinstance(error, BudgetExceeded):
+        details = {
+            "stage": "budget",
+            "cve_id": cve_id,
+            "error_type": type(error).__name__,
+            "message": f"{error.scope} {error.budget} budget exhausted",
+        }
+        return details, (
+            f"budget stage failed for {cve_id}: {details['message']} "
+            f"({details['error_type']})"
+        )
 
     details = {
         "stage": "pipeline",
@@ -70,6 +89,41 @@ def _serialize_pipeline_error(error, cve_id):
         f"Unexpected pipeline failure ({details['error_type']})"
     )
     return details, safe_message
+
+
+def _partial_stage_counts(state: dict) -> dict[str, int]:
+    """Return small, content-free counts that are safe to retain after failure."""
+
+    def mapping_count(name: str) -> int:
+        value = state.get(name)
+        return len(value) if isinstance(value, dict) else 0
+
+    def item_count(name: str) -> int:
+        value = state.get(name)
+        if not isinstance(value, dict):
+            return 0
+        return sum(len(items) for items in value.values() if isinstance(items, list))
+
+    return {
+        "reference_urls": len(state.get("nvd_url_references", []))
+        if isinstance(state.get("nvd_url_references"), list)
+        else 0,
+        "extracted_pages": mapping_count("nvd_references_pages"),
+        "semantic_chunks": item_count("nvd_references_chunks"),
+        "filtered_chunks": item_count("nvd_filtered_chunks"),
+        "summaries": mapping_count("summaries"),
+    }
+
+
+def _budget_error_from(error: BaseException) -> BudgetExceeded | None:
+    candidate = error.original_error if isinstance(error, PipelineStageError) else error
+    return candidate if isinstance(candidate, BudgetExceeded) else None
+
+
+def _attach_request_audit(entry: dict, context: ExecutionContext) -> None:
+    entry["request_audit"] = list(context.records)
+    entry["request_audit_summary"] = context.aggregate()
+    entry["budget_usage"] = context.budget_snapshot()["cve"]
 
 def _write_log(output_file: Path, log: dict) -> None:
     with open(output_file, "w", encoding="utf-8") as handle:
@@ -112,6 +166,17 @@ def _run_cases(
     if benchmark is not None:
         log["aggregated_scores"] = {}
 
+    budgets = runtime_config.budgets
+    run_budget = RunBudget.create(
+        BudgetCaps(
+            budgets.max_requests_per_run,
+            budgets.max_tokens_per_run,
+            budgets.max_run_seconds,
+        )
+    )
+    run_records: list[dict] = []
+    run_exhaustion: BudgetExceeded | None = None
+
     all_y_true: list[list[str]] = []
     all_y_pred: list[list[str]] = []
     for case in cases:
@@ -128,15 +193,29 @@ def _run_cases(
         )
         LOGGER.info("%s Analyzing %s", run_label, cve_id)
         stage_timer = StageTimingCallback(pipeline_names)
+        context = ExecutionContext.create(
+            cve_id,
+            BudgetCaps(
+                budgets.max_requests_per_cve,
+                budgets.max_tokens_per_cve,
+                budgets.max_cve_seconds,
+            ),
+            run_budget,
+        )
         try:
-            started = time.time()
-            if isinstance(pipeline_instance, lcr.RunnableSequence):
-                state = pipeline_instance.invoke(
-                    {"cve_id": cve_id}, config={"callbacks": [stage_timer]}
-                )
-            else:
-                state = pipeline_instance.invoke({"cve_id": cve_id})
-            elapsed = time.time() - started
+            if run_exhaustion is not None:
+                raise run_exhaustion
+            run_budget.counter.check_available("run")
+            started = time.monotonic()
+            with bind_execution_context(context):
+                if isinstance(pipeline_instance, lcr.RunnableSequence):
+                    state = pipeline_instance.invoke(
+                        {"cve_id": cve_id}, config={"callbacks": [stage_timer]}
+                    )
+                else:
+                    state = pipeline_instance.invoke({"cve_id": cve_id})
+                context.check_time()
+            elapsed = time.monotonic() - started
             predicted = state["cve_labels"]
             warnings = list(state.get("pipeline_warnings", []))
             status = "degraded" if warnings else "success"
@@ -150,11 +229,12 @@ def _run_cases(
                 "summaries": state.get("summaries", {}),
                 "rag_input": state.get("rag", ""),
                 "classification_output": predicted,
-                "required_time": elapsed,
-                "labels_motivation": state.get("labels_motivation", []),
-                "labels_confidence": state.get("labels_confidence", []),
+                "duration_seconds": elapsed,
+                "labels_motivation": state.get("labels_motivation", {}),
+                "labels_confidence": state.get("labels_confidence", {}),
                 **case_metadata,
             }
+            _attach_request_audit(entry, context)
             if state.get("reference_focus"):
                 entry["reference_focus"] = state["reference_focus"]
             if stage_timer.records:
@@ -175,22 +255,35 @@ def _run_cases(
                 elapsed,
             )
         except Exception as error:
+            budget_error = _budget_error_from(error)
+            if budget_error is not None and budget_error.scope == "run":
+                run_exhaustion = budget_error
             details, safe_message = _serialize_pipeline_error(error, cve_id)
             technical_error = (
                 error.original_error if isinstance(error, PipelineStageError) else error
             )
             report_error(LOGGER, f"{run_label} {safe_message}", technical_error)
+            partial_state = (
+                error.partial_state if isinstance(error, PipelineStageError) else {}
+            )
             error_entry = {
                 "status": "error",
-                "pipeline_warnings": [],
+                "pipeline_warnings": list(partial_state.get("pipeline_warnings", [])),
                 "error": details,
                 "error_message": safe_message,
                 "classification_output": ["ERROR"],
+                "labels_motivation": {},
+                "labels_confidence": {},
+                "partial_stage_counts": _partial_stage_counts(partial_state),
                 **case_metadata,
             }
+            _attach_request_audit(error_entry, context)
             if stage_timer.records:
                 error_entry["stage_timings"] = stage_timer.records
             log["cves"][cve_id] = error_entry
+        run_records.extend(context.records)
+        log["request_audit_summary"] = aggregate_request_records(run_records)
+        log["budget_usage"] = run_budget.counter.snapshot()
         _write_log(output_file, log)
         LOGGER.debug("%s Log updated for %s", run_label, cve_id)
 
