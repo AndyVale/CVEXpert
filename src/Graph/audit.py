@@ -220,5 +220,17 @@ def current_request_scope() -> dict[str, str | None]:
     return dict(_CURRENT_SCOPE.get())
 
 
+def mark_last_request_invalid(error_category: str) -> None:
+    """Mark the latest successful transport attempt as an invalid model result."""
+
+    context = current_execution_context()
+    if context is None or not context.records:
+        return
+    record = context.records[-1]
+    if record.get("status") == "success":
+        record["status"] = "invalid_output"
+        record["error_category"] = error_category
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

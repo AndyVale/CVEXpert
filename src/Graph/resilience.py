@@ -50,6 +50,13 @@ def _status_code(error: BaseException) -> int | None:
 
 
 def _headers(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        raw = value.get("raw")
+        if raw is not None:
+            return _headers(raw)
+        nested = value.get("headers")
+        if hasattr(nested, "items"):
+            return {str(key).lower(): str(item) for key, item in nested.items()}
     headers = getattr(value, "headers", None)
     if headers is None:
         response = getattr(value, "response", None)
@@ -101,6 +108,16 @@ def classify_error(error: BaseException) -> tuple[str, bool]:
 
 
 def _response_metadata(value: Any) -> tuple[str | None, int | None, dict[str, str]]:
+    if isinstance(value, dict) and value.get("raw") is not None:
+        return _response_metadata(value["raw"])
+    response_metadata = getattr(value, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        headers = _headers(response_metadata)
+        request_id = headers.get("x-request-id")
+        status = response_metadata.get("status_code")
+        rate_limits = {key: headers[key] for key in RATE_LIMIT_HEADERS if key in headers}
+        if request_id or isinstance(status, int) or rate_limits:
+            return request_id, status if isinstance(status, int) else None, rate_limits
     direct_status = getattr(value, "status_code", None)
     response = value if isinstance(direct_status, int) else getattr(value, "response", value)
     headers = _headers(response)

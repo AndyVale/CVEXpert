@@ -7,6 +7,7 @@ import os
 import json
 import time
 import requests
+import httpx
 from datetime import datetime, timezone
 from collections.abc import Sequence
 from functools import partial
@@ -38,6 +39,7 @@ from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_sc
 from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 from Graph.errors import PipelineStageError
+from Graph.model_requests import RepositoryRetryEmbeddings
 from Graph.request_pacing import MinimumIntervalPacer
 from Graph.resilience import RetryPolicy
 from Graph.reporting import (
@@ -298,24 +300,35 @@ def build_pipeline(runtime_config: RuntimeConfig, taxonomy: Taxonomy):
 
     LOGGER.debug("Constructing embedding client and linear pipeline")
 
-    embedding_http_client = DefaultHttpxClient(
-        event_hooks={
-            "request": [
-                MinimumIntervalPacer(
-                    runtime_config.embedding.request_delay_seconds
-                )
-            ]
-        }
+    retry_settings = runtime_config.resilience
+    embedding_settings = runtime_config.embedding
+    embedding_timeout = httpx.Timeout(
+        connect=embedding_settings.connect_timeout_seconds,
+        read=embedding_settings.read_timeout_seconds,
+        write=embedding_settings.write_timeout_seconds,
+        pool=embedding_settings.pool_timeout_seconds,
     )
+    embedding_http_client = DefaultHttpxClient(timeout=embedding_timeout)
 
-    embedding_model_instance = OpenAIEmbeddings(
-        model=runtime_config.embedding.model,
-        api_key=runtime_config.embedding.api_key,
-        base_url=runtime_config.embedding.base_url,
+    raw_embedding_model = OpenAIEmbeddings(
+        model=embedding_settings.model,
+        api_key=embedding_settings.api_key,
+        base_url=embedding_settings.base_url,
         http_client=embedding_http_client,
-        check_embedding_ctx_length=(
-            runtime_config.embedding.check_embedding_ctx_length
+        check_embedding_ctx_length=embedding_settings.check_embedding_ctx_length,
+        max_retries=0,
+        timeout=embedding_timeout,
+    )
+    embedding_model_instance = RepositoryRetryEmbeddings(
+        raw_embedding_model,
+        model_name=embedding_settings.model,
+        retry_policy=RetryPolicy(
+            max_attempts=embedding_settings.max_attempts,
+            initial_backoff_seconds=retry_settings.initial_backoff_seconds,
+            max_backoff_seconds=retry_settings.max_backoff_seconds,
+            max_retry_after_seconds=retry_settings.max_retry_after_seconds,
         ),
+        pacer=MinimumIntervalPacer(embedding_settings.request_delay_seconds),
     )
 
     semantic_chunker = SemanticChunkerNode(
@@ -338,44 +351,78 @@ def build_pipeline(runtime_config: RuntimeConfig, taxonomy: Taxonomy):
         threshold=runtime_config.cosine_filter.threshold,
     )
 
-    chat_http_client = DefaultHttpxClient(
-        event_hooks={
-            "request": [
-                MinimumIntervalPacer(runtime_config.chat.request_delay_seconds)
-            ]
-        }
+    chat_settings = runtime_config.chat
+    chat_timeout = httpx.Timeout(
+        connect=chat_settings.connect_timeout_seconds,
+        read=chat_settings.read_timeout_seconds,
+        write=chat_settings.write_timeout_seconds,
+        pool=chat_settings.pool_timeout_seconds,
     )
+    chat_http_client = DefaultHttpxClient(timeout=chat_timeout)
+    chat_pacer = MinimumIntervalPacer(chat_settings.request_delay_seconds)
 
     summarizer_llm = init_chat_model(
-        model=runtime_config.chat.summarizer_model,
+        model=chat_settings.summarizer_model,
         model_provider="openai",
-        api_key=runtime_config.chat.api_key,
-        base_url=runtime_config.chat.base_url,
-        temperature=runtime_config.chat.summarizer_temperature,
+        api_key=chat_settings.api_key,
+        base_url=chat_settings.base_url,
+        temperature=chat_settings.summarizer_temperature,
         http_client=chat_http_client,
+        timeout=chat_timeout,
+        max_retries=0,
+        max_tokens=runtime_config.summarization.max_output_tokens,
+        include_response_headers=True,
     )
 
     summarizer = CVEAwareSummarizerNode(
         model=summarizer_llm,
         labels_descriptions=taxonomy.root_descriptions,
+        model_name=chat_settings.summarizer_model,
+        retry_policy=RetryPolicy(
+            max_attempts=runtime_config.summarization.max_attempts,
+            initial_backoff_seconds=retry_settings.initial_backoff_seconds,
+            max_backoff_seconds=retry_settings.max_backoff_seconds,
+            max_retry_after_seconds=retry_settings.max_retry_after_seconds,
+        ),
+        request_pacer=chat_pacer,
+        max_input_tokens=runtime_config.summarization.max_input_tokens,
+        max_output_tokens=runtime_config.summarization.max_output_tokens,
+        structured_repair_attempts=(
+            runtime_config.summarization.structured_repair_attempts
+        ),
     )
 
     classifier_llm = init_chat_model(
-        model=runtime_config.chat.classifier_model,
+        model=chat_settings.classifier_model,
         model_provider="openai",
-        api_key=runtime_config.chat.api_key,
-        base_url=runtime_config.chat.base_url,
-        temperature=runtime_config.chat.classifier_temperature,
+        api_key=chat_settings.api_key,
+        base_url=chat_settings.base_url,
+        temperature=chat_settings.classifier_temperature,
         http_client=chat_http_client,
+        timeout=chat_timeout,
+        max_retries=0,
+        max_tokens=runtime_config.classification.max_output_tokens,
+        include_response_headers=True,
     )
 
     classifier = CVEClassifierNode(
         model=classifier_llm,
         taxonomy=taxonomy,
         max_input_tokens=runtime_config.classification.max_input_tokens,
+        model_name=chat_settings.classifier_model,
+        retry_policy=RetryPolicy(
+            max_attempts=runtime_config.classification.max_attempts,
+            initial_backoff_seconds=retry_settings.initial_backoff_seconds,
+            max_backoff_seconds=retry_settings.max_backoff_seconds,
+            max_retry_after_seconds=retry_settings.max_retry_after_seconds,
+        ),
+        request_pacer=chat_pacer,
+        max_output_tokens=runtime_config.classification.max_output_tokens,
+        structured_repair_attempts=(
+            runtime_config.classification.structured_repair_attempts
+        ),
     )
 
-    retry_settings = runtime_config.resilience
     nvd_session = requests.Session()
     configured_nvd_caller = partial(
         nvd_caller,

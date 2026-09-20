@@ -2,6 +2,7 @@ from tqdm import tqdm
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from Graph.errors import make_pipeline_warning
+from Graph.audit import request_scope
 from Graph.reporting import get_logger, report_warning
 from Graph.reference_focus import focus_broad_cve_reference
 from Graph.state import CVEClassifierState
@@ -278,7 +279,13 @@ class SemanticChunkerNode:
                         len(focused_text),
                     )
                 # split_text returns a list of strings
-                chunks = self.splitter.split_text(focused_text)
+                with request_scope(
+                    stage="chunk",
+                    operation="embed_documents",
+                    source=url,
+                    model=getattr(self.embed_model, "model_name", None),
+                ):
+                    chunks = self.splitter.split_text(focused_text)
                 if not chunks:
                     raise ValueError("Chunker returned no chunks")
                 allowed_chunks = min(

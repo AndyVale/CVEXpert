@@ -1,6 +1,6 @@
 from tqdm import tqdm
 import numpy as np
-from Graph.audit import BudgetExceeded
+from Graph.audit import BudgetExceeded, request_scope
 from Graph.errors import PipelineStageError, make_pipeline_warning
 from Graph.reporting import get_logger, report_warning
 from Graph.state import CVEClassifierState
@@ -107,9 +107,15 @@ class CosineFilterNode:
         )
         try:
             if self.query_embedding is None:
-                self.query_embedding = _normalize_query_embedding(
-                    self.embed_model.embed_query(self.query)
-                )
+                with request_scope(
+                    stage="filter",
+                    operation="embed_query",
+                    source="relevance-query",
+                    model=getattr(self.embed_model, "model_name", None),
+                ):
+                    self.query_embedding = _normalize_query_embedding(
+                        self.embed_model.embed_query(self.query)
+                    )
         except Exception as error:
             raise PipelineStageError(
                 stage="filter",
@@ -122,17 +128,25 @@ class CosineFilterNode:
         successful_references = 0
         failed_references = 0
         last_reference_error: BaseException | None = None
-        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
+        for reference_index, (url, chunks) in enumerate(
+            tqdm(references_chunks.items(), "Filtering chunks using cosine"), start=1
+        ):
             if not chunks:
                 filtered_results[url] = []
                 continue
 
             try:
-                chunk_embeddings = _normalize_document_embeddings(
-                    self.embed_model.embed_documents(chunks),
-                    document_count=len(chunks),
-                    embedding_dimension=self.query_embedding.shape[0],
-                )
+                with request_scope(
+                    stage="filter",
+                    operation="embed_documents",
+                    source=f"reference-{reference_index:03d}",
+                    model=getattr(self.embed_model, "model_name", None),
+                ):
+                    chunk_embeddings = _normalize_document_embeddings(
+                        self.embed_model.embed_documents(chunks),
+                        document_count=len(chunks),
+                        embedding_dimension=self.query_embedding.shape[0],
+                    )
                 successful_references += 1
                 similarities = np.dot(chunk_embeddings, self.query_embedding)
 

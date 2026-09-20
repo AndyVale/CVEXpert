@@ -295,10 +295,14 @@ class RunnerTests(unittest.TestCase):
             base_url="https://embedding.example.test/v1",
             http_client=embedding_http_client,
             check_embedding_ctx_length=False,
+            max_retries=0,
+            timeout=unittest.mock.ANY,
         )
         embed_query.assert_not_called()
+        chat_calls = [dict(call.kwargs) for call in chat_factory.call_args_list]
+        chat_timeouts = [call.pop("timeout") for call in chat_calls]
         self.assertEqual(
-            [call.kwargs for call in chat_factory.call_args_list],
+            chat_calls,
             [
                 {
                     "model": "summarizer-model",
@@ -307,6 +311,9 @@ class RunnerTests(unittest.TestCase):
                     "base_url": "https://chat.example.test/v1",
                     "temperature": 0.0,
                     "http_client": chat_http_client,
+                    "max_retries": 0,
+                    "max_tokens": 768,
+                    "include_response_headers": True,
                 },
                 {
                     "model": "classifier-model",
@@ -315,18 +322,24 @@ class RunnerTests(unittest.TestCase):
                     "base_url": "https://chat.example.test/v1",
                     "temperature": 0.0,
                     "http_client": chat_http_client,
+                    "max_retries": 0,
+                    "max_tokens": 512,
+                    "include_response_headers": True,
                 },
             ],
         )
         self.assertEqual(http_client_factory.call_count, 2)
-        embedding_pacer = http_client_factory.call_args_list[0].kwargs[
-            "event_hooks"
-        ]["request"][0]
-        chat_pacer = http_client_factory.call_args_list[1].kwargs[
-            "event_hooks"
-        ]["request"][0]
+        embedding_timeout = http_client_factory.call_args_list[0].kwargs["timeout"]
+        chat_timeout = http_client_factory.call_args_list[1].kwargs["timeout"]
+        embedding_pacer = pipeline.steps[2].func.embed_model.pacer
+        chat_pacer = pipeline.steps[4].func.request_pacer
         self.assertEqual(embedding_pacer.minimum_interval_seconds, 0.7)
         self.assertEqual(chat_pacer.minimum_interval_seconds, 4.2)
+        self.assertEqual(embedding_timeout.connect, 10.0)
+        self.assertEqual(embedding_timeout.read, 60.0)
+        self.assertEqual(chat_timeout.write, 60.0)
+        self.assertEqual(chat_timeout.pool, 10.0)
+        self.assertTrue(all(timeout is chat_timeout for timeout in chat_timeouts))
         nvd_arguments = pipeline.steps[0].func.keywords
         self.assertEqual(
             nvd_arguments["base_url"],

@@ -19,7 +19,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 - Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
-- Reliability hardening is in progress. Repository-owned retry/budget foundations, strict NVD parsing, bounded public-only reference acquisition, semantic chunk caps, and per-reference filter recovery are implemented. Model repair/telemetry and atomic versioned artifacts remain in this tranche.
+- Reliability hardening is in progress. Repository-owned retries and explicit model transports are active, acquisition and chunk/filter work is bounded, model inputs/outputs are capped, and malformed structured results receive one audited repair request. Runner-level budget binding, complete artifact telemetry, and atomic versioned persistence remain.
 
 ## Durable user decisions
 
@@ -637,6 +637,14 @@ These are proposals, not authorization to edit production code:
 - Replaced implicit page downloading with bounded streaming fetches. Initial and redirected URLs are limited to credential-free HTTP(S) destinations that resolve only to global addresses, redirects are manually capped and revalidated, content types are allowlisted, declared/streamed byte limits are enforced, and extracted text is bounded per reference and CVE.
 - Added deterministic per-reference and per-CVE semantic chunk caps. Filtering keeps query embedding failure terminal, isolates document embedding/cosine failures by reference, preserves successful references and warnings, and becomes terminal only when every non-empty reference fails.
 - The four commits through this point pass 104 offline tests plus compilation, lock consistency, installed dependency consistency, and whitespace checks. No live service call has been made during this tranche yet.
+
+### 2026-09-20 — Bounded model requests and structured repair
+
+- Disabled OpenAI SDK retries for active chat and embedding clients and configured explicit connect/read/write/pool timeouts. Synchronous embedding and structured chat calls now use repository-owned three-attempt retry policies and share the existing stage-specific pacers.
+- Added conservative per-call input estimates and configured output-token reservations. Oversized summarizer evidence is deterministically truncated with a degraded warning; classifier group preflight and `most_specific` behavior remain unchanged.
+- Active summarizer and classifier calls retain raw structured-response metadata for auditing, validate parsed results, and make at most one bounded repair request containing the validation problem and prior output as delimited untrusted data. Exhausted summarizer repair degrades one reference; exhausted classifier repair remains terminal.
+- Scraped and classified evidence prompts now explicitly identify external content as untrusted and prohibit embedded instructions. Stable prompt/schema version constants were introduced for the forthcoming run metadata.
+- Provider token usage, request IDs, and whitelisted rate-limit headers are captured when exposed, with estimates retained otherwise; telemetry never stores prompts, responses, credentials, or raw exception text. All 109 offline tests and the complete static verification gate pass.
 
 ## Notes maintenance checklist
 
