@@ -35,12 +35,14 @@ class PipelineStageError(RuntimeError):
         cve_id: str,
         error: BaseException,
         safe_message: str,
+        partial_state: dict[str, Any] | None = None,
     ):
         self.stage = stage
         self.cve_id = cve_id
         self.error_type = type(error).__name__
         self.safe_message = safe_message
         self.original_error = error
+        self.partial_state = dict(partial_state or {})
         super().__init__(
             f"{stage} stage failed for {cve_id}: "
             f"{safe_message} ({self.error_type})"

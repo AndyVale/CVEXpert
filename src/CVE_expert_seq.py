@@ -6,6 +6,7 @@ import argparse
 import os
 import json
 import time
+import requests
 from datetime import datetime, timezone
 from collections.abc import Sequence
 from functools import partial
@@ -38,6 +39,7 @@ from Graph.Nodes.formatters import formatter
 from Graph.Nodes.classifiers import CVEClassifierNode
 from Graph.errors import PipelineStageError
 from Graph.request_pacing import MinimumIntervalPacer
+from Graph.resilience import RetryPolicy
 from Graph.reporting import (
     configure_console,
     get_logger,
@@ -369,10 +371,21 @@ def build_pipeline(runtime_config: RuntimeConfig, taxonomy: Taxonomy):
         max_input_tokens=runtime_config.classification.max_input_tokens,
     )
 
+    retry_settings = runtime_config.resilience
+    nvd_session = requests.Session()
     configured_nvd_caller = partial(
         nvd_caller,
         base_url=runtime_config.nvd.base_url,
         timeout_seconds=runtime_config.nvd.timeout_seconds,
+        connect_timeout_seconds=runtime_config.nvd.connect_timeout_seconds,
+        retry_policy=RetryPolicy(
+            max_attempts=runtime_config.nvd.max_attempts,
+            initial_backoff_seconds=retry_settings.initial_backoff_seconds,
+            max_backoff_seconds=retry_settings.max_backoff_seconds,
+            max_retry_after_seconds=retry_settings.max_retry_after_seconds,
+        ),
+        session=nvd_session,
+        api_key=runtime_config.nvd.api_key,
         request_pacer=MinimumIntervalPacer(
             runtime_config.nvd.request_delay_seconds
         ),
@@ -437,6 +450,7 @@ def main(
         sensitive_values=(
             runtime_config.chat.api_key,
             runtime_config.embedding.api_key,
+            runtime_config.nvd.api_key or "",
         ),
     )
     if verbose:

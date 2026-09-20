@@ -487,6 +487,13 @@ These are proposals, not authorization to edit production code:
 - Declared the already-transitive `httpx` package as a direct dependency because production code will construct component-level model timeouts.
 - The complete offline suite passes with 94 tests; compilation, lock validation, installed dependency checks, and whitespace checks pass.
 
+### 2026-09-20 — NVD acquisition hardening
+
+- NVD requests now support a shared session, optional API-key header, explicit connect/read timeouts, repository-owned retries, pacing telemetry, and safe partial state on terminal failure.
+- Response parsing verifies the requested CVE ID, requires an English description, skips malformed references with warnings, normalizes public HTTP(S) reference syntax, and removes exact normalized duplicates while retaining ranked order.
+- Added reusable URL normalization for the reference trust boundary. Public-address resolution is applied by the scraper unit rather than during NVD parsing.
+- The complete offline suite passes with 96 tests; compilation, lock validation, installed dependency checks, and whitespace checks pass.
+
 ### 2026-08-29 — Initial exploration and review
 
 - Read the current README and every Python file on `main`.

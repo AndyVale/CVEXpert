@@ -116,7 +116,7 @@ class NvdFailureTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.stage, "nvd")
-        self.assertEqual(raised.exception.error_type, "IndexError")
+        self.assertEqual(raised.exception.error_type, "ValueError")
 
 
 class FormatterFailureTests(unittest.TestCase):

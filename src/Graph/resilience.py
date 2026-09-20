@@ -101,7 +101,8 @@ def classify_error(error: BaseException) -> tuple[str, bool]:
 
 
 def _response_metadata(value: Any) -> tuple[str | None, int | None, dict[str, str]]:
-    response = getattr(value, "response", value)
+    direct_status = getattr(value, "status_code", None)
+    response = value if isinstance(direct_status, int) else getattr(value, "response", value)
     headers = _headers(response)
     request_id = (
         getattr(value, "_request_id", None)
