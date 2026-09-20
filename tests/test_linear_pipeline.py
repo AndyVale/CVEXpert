@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from uuid import UUID
 
 from langchain_core.runnables import RunnableLambda
 
@@ -274,7 +275,8 @@ class RunnerTests(unittest.TestCase):
                 make_benchmark({"CVE-ONE": ["XSS"], "CVE-TWO": ["XSS"]}),
                 run_number=0,
             )
-            log = json.loads((Path(temp_dir) / "RUN_0.json").read_text())
+            output_path = next(Path(temp_dir).glob("RUN_0_*.json"))
+            log = json.loads(output_path.read_text())
 
         self.assertEqual(pipeline.invocations, ["CVE-ONE"])
         self.assertEqual(
@@ -496,7 +498,7 @@ class RunnerTests(unittest.TestCase):
                 run_number=0,
             )
 
-            output_path = output_directory / "RUN_0.json"
+            output_path = next(output_directory.glob("RUN_0_*.json"))
             log = json.loads(output_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result, "Finished: Run 0")
@@ -508,6 +510,25 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(log["aggregated_scores"]["f1"], 1.0)
         self.assertEqual(log["aggregated_scores"]["accuracy"], 1.0)
+        self.assertEqual(log["schema_version"], 1)
+        UUID(log["pipeline_metadata"]["run_id"])
+        self.assertEqual(log["pipeline_metadata"]["run_number"], 0)
+        self.assertNotIn("RUN_N", log["pipeline_metadata"])
+        self.assertTrue(log["pipeline_metadata"]["started_at"].endswith("Z"))
+        self.assertTrue(log["pipeline_metadata"]["completed_at"].endswith("Z"))
+        self.assertGreaterEqual(log["pipeline_metadata"]["duration_seconds"], 0)
+        self.assertEqual(
+            log["pipeline_metadata"]["prompt_versions"],
+            {"summarizer": "cve-aware-v2", "classifier": "taxonomy-most-specific-v2"},
+        )
+        self.assertEqual(len(log["pipeline_metadata"]["configuration_fingerprint"]), 64)
+        self.assertIn("httpx", log["pipeline_metadata"]["direct_dependency_versions"])
+        self.assertRegex(
+            output_path.name,
+            r"^RUN_0_\d{8}T\d{12}Z_[0-9a-f]{8}\.json$",
+        )
+        self.assertEqual(log["cves"]["CVE-TEST-1"]["labels_motivation"], {})
+        self.assertEqual(log["cves"]["CVE-TEST-1"]["labels_confidence"], {})
         self.assertEqual(log["pipeline_metadata"]["taxonomy_sha256"], "test-fingerprint")
         self.assertEqual(log["cves"]["CVE-TEST-1"]["rationale"], "Why CVE-TEST-1")
         self.assertEqual(log["cves"]["CVE-TEST-1"]["sources"], ["https://source.test"])
@@ -519,6 +540,66 @@ class RunnerTests(unittest.TestCase):
                     "focused_chars": 4_000,
                 }
             },
+        )
+
+    def test_benchmark_artifacts_are_unique_and_preserve_legacy_file(self):
+        pipeline = FakePipeline({"CVE-TEST-1": {"cve_labels": ["XSS"]}})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_directory = Path(temp_dir)
+            legacy = output_directory / "RUN_0.json"
+            legacy.write_text('{"legacy": true}', encoding="utf-8")
+            runtime_config = make_runtime_config(temp_dir)
+            benchmark = make_benchmark({"CVE-TEST-1": ["XSS"]})
+
+            CVE_expert_seq.run_evaluation(
+                pipeline, ["FakePipeline"], runtime_config, TEST_TAXONOMY, benchmark
+            )
+            CVE_expert_seq.run_evaluation(
+                pipeline, ["FakePipeline"], runtime_config, TEST_TAXONOMY, benchmark
+            )
+
+            artifacts = list(output_directory.glob("RUN_0_*.json"))
+            legacy_content = legacy.read_text(encoding="utf-8")
+
+        self.assertEqual(len(artifacts), 2)
+        self.assertEqual(legacy_content, '{"legacy": true}')
+
+    def test_atomic_log_preserves_checkpoint_after_serialization_failure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "artifact.json"
+            CVE_expert_seq._write_log(output_path, {"valid": True})
+
+            with self.assertRaises(TypeError):
+                CVE_expert_seq._write_log(output_path, {"bad": object()})
+
+            persisted = json.loads(output_path.read_text(encoding="utf-8"))
+            abandoned = list(Path(temp_dir).glob(".artifact.json.*.tmp"))
+
+        self.assertEqual(persisted, {"valid": True})
+        self.assertEqual(abandoned, [])
+
+    def test_configuration_fingerprint_excludes_api_keys(self):
+        runtime_config = make_runtime_config("logs/test-run")
+        changed_secrets = replace(
+            runtime_config,
+            chat=replace(runtime_config.chat, api_key="different-chat-secret"),
+            embedding=replace(
+                runtime_config.embedding, api_key="different-embedding-secret"
+            ),
+        )
+        changed_model = replace(
+            runtime_config,
+            chat=replace(runtime_config.chat, classifier_model="another-model"),
+        )
+
+        original = CVE_expert_seq._safe_configuration_fingerprint(runtime_config)
+        self.assertEqual(
+            original,
+            CVE_expert_seq._safe_configuration_fingerprint(changed_secrets),
+        )
+        self.assertNotEqual(
+            original,
+            CVE_expert_seq._safe_configuration_fingerprint(changed_model),
         )
 
     def test_benchmark_log_and_scores_cover_only_requested_subset(self):
@@ -543,7 +624,8 @@ class RunnerTests(unittest.TestCase):
                 pipeline, ["FakePipeline"], make_runtime_config(temp_dir),
                 TEST_TAXONOMY, benchmark,
             )
-            log = json.loads((Path(temp_dir) / "RUN_0.json").read_text(encoding="utf-8"))
+            output_path = next(Path(temp_dir).glob("RUN_0_*.json"))
+            log = json.loads(output_path.read_text(encoding="utf-8"))
 
         self.assertEqual(pipeline.invocations, ["CVE-2024-0003", "CVE-2024-0002"])
         self.assertEqual(list(log["cves"]), pipeline.invocations)
@@ -610,7 +692,7 @@ class RunnerTests(unittest.TestCase):
                 run_number=0,
             )
 
-            output_path = output_directory / "RUN_0.json"
+            output_path = next(output_directory.glob("RUN_0_*.json"))
             log = json.loads(output_path.read_text(encoding="utf-8"))
 
         self.assertEqual(log["cves"]["CVE-SUCCESS"]["status"], "success")

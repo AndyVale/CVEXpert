@@ -3,9 +3,16 @@ Linear workflow to classify CVEs against list of labels.
 """
 
 import argparse
+from dataclasses import asdict
+import hashlib
+from importlib import metadata as importlib_metadata
 import os
 import json
+import re
+import subprocess
+import tempfile
 import time
+import tomllib
 import requests
 import httpx
 from datetime import datetime, timezone
@@ -19,7 +26,12 @@ import langchain_core.runnables as lcr
 from langchain_openai import OpenAIEmbeddings
 from openai import DefaultHttpxClient
 
-from Definitions.config import CONFIG_PATH, RuntimeConfig, validate_runtime_config
+from Definitions.config import (
+    CONFIG_PATH,
+    REPOSITORY_ROOT,
+    RuntimeConfig,
+    validate_runtime_config,
+)
 from Definitions.fixtures import (
     Benchmark,
     BenchmarkCase,
@@ -34,10 +46,18 @@ from Graph.Nodes.nvd import nvd_caller
 from Graph.Nodes.scrapers import extract_md_trafilatura
 from Graph.Nodes.chunkers import SemanticChunkerNode
 from Graph.Nodes.filters import CosineFilterNode
-from Graph.Nodes.summarizers import CVEAwareSummarizerNode
+from Graph.Nodes.summarizers import (
+    CVEAwareSummarizerNode,
+    SUMMARIZER_PROMPT_VERSION,
+    SUMMARIZER_SCHEMA_VERSION,
+)
 from Graph.Nodes.evaluators import compute_grouped_scores, compute_individual_scores
 from Graph.Nodes.formatters import formatter
-from Graph.Nodes.classifiers import CVEClassifierNode
+from Graph.Nodes.classifiers import (
+    CLASSIFIER_PROMPT_VERSION,
+    CLASSIFIER_SCHEMA_VERSION,
+    CVEClassifierNode,
+)
 from Graph.errors import PipelineStageError
 from Graph.audit import (
     BudgetCaps,
@@ -126,8 +146,109 @@ def _attach_request_audit(entry: dict, context: ExecutionContext) -> None:
     entry["budget_usage"] = context.budget_snapshot()["cve"]
 
 def _write_log(output_file: Path, log: dict) -> None:
-    with open(output_file, "w", encoding="utf-8") as handle:
-        json.dump(log, handle, indent=2)
+    """Write a same-directory checkpoint and atomically replace the run artifact."""
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_file.parent,
+            prefix=f".{output_file.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(log, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, output_file)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _safe_configuration_fingerprint(runtime_config: RuntimeConfig) -> str:
+    def strip_secrets(value):
+        if isinstance(value, dict):
+            return {
+                key: strip_secrets(item)
+                for key, item in value.items()
+                if key != "api_key"
+            }
+        if isinstance(value, list):
+            return [strip_secrets(item) for item in value]
+        return value
+
+    payload = json.dumps(
+        strip_secrets(asdict(runtime_config)),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _git_metadata(repository_root: Path = REPOSITORY_ROOT) -> dict[str, str | bool | None]:
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repository_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        return {"revision": revision or None, "dirty": dirty}
+    except (OSError, subprocess.SubprocessError):
+        return {"revision": None, "dirty": None}
+
+
+def _direct_dependency_versions(
+    pyproject_path: Path = REPOSITORY_ROOT / "pyproject.toml",
+) -> dict[str, str | None]:
+    try:
+        with pyproject_path.open("rb") as handle:
+            dependencies = tomllib.load(handle)["project"]["dependencies"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return {}
+
+    versions: dict[str, str | None] = {}
+    for declaration in dependencies:
+        match = re.match(r"[A-Za-z0-9_.-]+", declaration)
+        if match is None:
+            continue
+        name = match.group(0)
+        try:
+            versions[name] = importlib_metadata.version(name)
+        except importlib_metadata.PackageNotFoundError:
+            versions[name] = None
+    return versions
+
+
+def _new_artifact_identity(prefix: str, output_directory: Path) -> tuple[str, str, Path]:
+    """Return UUID/timestamp/path while never selecting an existing artifact."""
+
+    while True:
+        run_uuid = uuid4()
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        output_file = output_directory / f"{prefix}_{stamp}_{run_uuid.hex[:8]}.json"
+        if not output_file.exists():
+            return str(run_uuid), _utc_timestamp(), output_file
 
 
 def _run_cases(
@@ -140,6 +261,8 @@ def _run_cases(
     *,
     benchmark: Benchmark | None = None,
     run_number: int | None = None,
+    run_id: str,
+    started_at: str,
 ):
     """Persist each result while isolating failures to individual CVEs."""
 
@@ -148,21 +271,35 @@ def _run_cases(
     mode = "benchmark" if benchmark is not None else "classification"
     run_label = f"[Run {run_number}]" if benchmark is not None else "[Classification]"
     LOGGER.info("%s Starting. Log: %s", run_label, output_file)
+    run_started_monotonic = time.monotonic()
 
     metadata = {
-        "run_id": "_".join(pipeline_names),
+        "run_id": run_id,
         "mode": mode,
+        "started_at": started_at,
+        "completed_at": None,
         "pipeline_structure": pipeline_names,
         "models": runtime_config.model_metadata,
         "taxonomy_name": taxonomy.name,
         "taxonomy_file": str(taxonomy.source_path),
         "taxonomy_sha256": taxonomy.fingerprint,
         "labels_schema": taxonomy.descriptions,
+        "prompt_versions": {
+            "summarizer": SUMMARIZER_PROMPT_VERSION,
+            "classifier": CLASSIFIER_PROMPT_VERSION,
+        },
+        "structured_output_schema_versions": {
+            "summarizer": SUMMARIZER_SCHEMA_VERSION,
+            "classifier": CLASSIFIER_SCHEMA_VERSION,
+        },
+        "source_code": _git_metadata(),
+        "direct_dependency_versions": _direct_dependency_versions(),
+        "configuration_fingerprint": _safe_configuration_fingerprint(runtime_config),
     }
     if benchmark is not None:
-        metadata["RUN_N"] = run_number + 1
+        metadata["run_number"] = run_number
         metadata["expected_classification_file"] = str(benchmark.source_path)
-    log = {"pipeline_metadata": metadata, "cves": {}}
+    log = {"schema_version": 1, "pipeline_metadata": metadata, "cves": {}}
     if benchmark is not None:
         log["aggregated_scores"] = {}
 
@@ -202,11 +339,11 @@ def _run_cases(
             ),
             run_budget,
         )
+        case_started = time.monotonic()
         try:
             if run_exhaustion is not None:
                 raise run_exhaustion
             run_budget.counter.check_available("run")
-            started = time.monotonic()
             with bind_execution_context(context):
                 if isinstance(pipeline_instance, lcr.RunnableSequence):
                     state = pipeline_instance.invoke(
@@ -215,7 +352,7 @@ def _run_cases(
                 else:
                     state = pipeline_instance.invoke({"cve_id": cve_id})
                 context.check_time()
-            elapsed = time.monotonic() - started
+            elapsed = time.monotonic() - case_started
             predicted = state["cve_labels"]
             warnings = list(state.get("pipeline_warnings", []))
             status = "degraded" if warnings else "success"
@@ -272,6 +409,7 @@ def _run_cases(
                 "error": details,
                 "error_message": safe_message,
                 "classification_output": ["ERROR"],
+                "duration_seconds": time.monotonic() - case_started,
                 "labels_motivation": {},
                 "labels_confidence": {},
                 "partial_stage_counts": _partial_stage_counts(partial_state),
@@ -323,6 +461,10 @@ def _run_cases(
             render_benchmark_results(log["cves"], log["aggregated_scores"]),
         )
 
+    metadata["completed_at"] = _utc_timestamp()
+    metadata["duration_seconds"] = round(time.monotonic() - run_started_monotonic, 3)
+    _write_log(output_file, log)
+
     LOGGER.info(
         "%s Completed: successful=%s degraded=%s failed=%s file=%s",
         run_label,
@@ -348,7 +490,9 @@ def run_evaluation(
         raise FixtureError("Benchmark does not match the selected taxonomy")
     if run_number is None:
         run_number = runtime_config.evaluation.run_number
-    output_file = runtime_config.evaluation.resolved_log_directory() / f"RUN_{run_number}.json"
+    run_id, started_at, output_file = _new_artifact_identity(
+        f"RUN_{run_number}", runtime_config.evaluation.resolved_log_directory()
+    )
     return _run_cases(
         pipeline_instance,
         pipeline_names,
@@ -358,6 +502,8 @@ def run_evaluation(
         output_file,
         benchmark=benchmark,
         run_number=run_number,
+        run_id=run_id,
+        started_at=started_at,
     )
 
 
@@ -373,10 +519,8 @@ def run_classification(
     normalized_ids = [normalize_cve_id(cve_id) for cve_id in cve_ids]
     if not normalized_ids or len(normalized_ids) != len(set(normalized_ids)):
         raise FixtureError("Classification requires unique CVE IDs")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    output_file = (
-        runtime_config.evaluation.resolved_log_directory()
-        / f"CLASSIFY_{stamp}_{uuid4().hex[:8]}.json"
+    run_id, started_at, output_file = _new_artifact_identity(
+        "CLASSIFY", runtime_config.evaluation.resolved_log_directory()
     )
     return _run_cases(
         pipeline_instance,
@@ -385,6 +529,8 @@ def run_classification(
         taxonomy,
         normalized_ids,
         output_file,
+        run_id=run_id,
+        started_at=started_at,
     )
 
 

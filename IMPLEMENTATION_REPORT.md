@@ -216,17 +216,31 @@ Small inputs can still have long model latency, as shown by the 18.13-second bas
 
 `CVE-2020-14864` remained `AccessControl` instead of the expected `PathAndResourceSelection`. Both runs ended without an accepted external summary, leaving a generic NVD description centered on unauthorized access. The current evidence supports investigating reference selection, filtering, or summarization before changing the taxonomy or classifier prompt.
 
+## Reliability hardening tranche (2026-09-20)
+
+The active linear pipeline now owns its retry behavior instead of relying on opaque SDK defaults. NVD, reference, embedding, summarizer, and classifier operations use at most three attempts with exponential full jitter, bounded `Retry-After`, explicit timeouts, and permanent/transient error classification. Chat and embedding SDK retries are disabled.
+
+NVD parsing now verifies exactly one matching CVE record, selects a non-empty English description, validates references independently, normalizes URLs, and removes ordered duplicates. Reference acquisition streams through a shared session, manually validates up to five redirects, rejects credentials and any non-public resolved address, allowlists textual media types, and enforces byte and extracted-character ceilings.
+
+Semantic chunking is capped per reference and CVE. Document embedding and cosine failures are isolated by reference; usable references survive and make the result degraded. Query embedding and loss of all non-empty references remain terminal. Summarizer evidence is preflighted and truncated within its configured estimate. Summarizer and classifier outputs reserve explicit generation budgets, retain raw metadata for audit, and receive one schema-repair request after parsing or validation failure. External evidence and prior malformed output are delimited as untrusted data.
+
+One monotonic execution context per CVE shares a run ledger. Every NVD, redirect, reference, embedding, summary, repair, and classification attempt consumes request capacity; model calls reserve estimated input plus maximum output tokens and replace estimates with provider usage when supplied. Request records contain only stage/operation identifiers, model/reference/group identity, attempt timing, pacing/retry delay, HTTP/result categories, provider request ID, token usage source, and allowlisted rate-limit headers. Prompts, responses, credentials, and raw exception messages are excluded.
+
+Artifact schema version 1 uses unique benchmark and classification filenames, UUID run identity, zero-based run numbers, UTC timestamps, monotonic durations, prompt/schema versions, source revision/dirty state, direct dependency versions, and a secret-free configuration fingerprint. Checkpoints use a flushed and synchronized same-directory temporary file followed by atomic replacement. A serialization failure leaves the preceding valid checkpoint in place and removes the abandoned temporary file.
+
+This tranche deliberately does not add persistent caching/resume, source-excerpt provenance, hierarchy-aware label routing, embedding batching, concurrency, content-addressed bodies, or dormant-code cleanup.
+
 ## Verification
 
 The final offline checks completed without live requests:
 
-- 88 `unittest` tests passed;
+- 116 `unittest` tests passed;
 - Python compilation passed for `src` and `tests`;
 - `uv lock --check` passed;
 - `uv pip check` found the environment compatible;
 - `git diff --check` passed.
 
-Coverage includes all three supplied pairs and their 9, 39, and 84 labels and 50 cases, canonical fingerprint mismatches, malformed hierarchies, CLI modes and errors, bounded grouping, ancestor removal across groups, `NONE`, terminal failures, mode-specific logs and scores, lazy query-embedding retry, stage timings, and the broad-index focus behavior.
+Coverage includes all three supplied fixture pairs, retry and deadline behavior, safe NVD/reference handling, content and chunk limits, partial filtering, structured-output repair, input/output token bounds, request audit aggregation, run/CVE exhaustion, partial warning preservation, unique schema-versioned filenames, and atomic checkpoint failure behavior.
 
 ## Debugger configuration
 

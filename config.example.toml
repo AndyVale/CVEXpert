@@ -80,11 +80,13 @@ structured_repair_attempts = 1
 max_output_tokens = 512
 
 [resilience]
+# Full-jitter exponential backoff. Retry-After values above the maximum fail fast.
 initial_backoff_seconds = 1.0
 max_backoff_seconds = 30.0
 max_retry_after_seconds = 30.0
 
 [budgets]
+# Cooperative hard limits. Every external HTTP/model attempt counts as one request.
 max_requests_per_cve = 100
 max_tokens_per_cve = 250000
 max_cve_seconds = 600.0

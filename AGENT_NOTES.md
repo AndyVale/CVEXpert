@@ -19,7 +19,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 - Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
-- Reliability hardening is in progress. Repository-owned retries, explicit timeouts, bounded acquisition/model work, structured repair, live CVE/run budgets, and safe per-attempt telemetry are active. Atomic versioned artifact persistence and documentation/live validation remain.
+- Reliability hardening implementation is complete through atomic schema-versioned artifacts. Static verification and authorized live one-CVE/ten-CVE validation remain before final handoff.
 
 ## Durable user decisions
 
@@ -96,7 +96,7 @@ There is no acquisition, page, chunk, embedding, or summary cache. Each requeste
 - Filter: `CosineFilterNode`, query `What type of vulnerability is it?`, threshold `0.6`
 - Summarizer: `CVEAwareSummarizerNode`
 - Classifier: `CVEClassifierNode`
-- Template benchmark output location: `logs/RUN_0.json`; classification-only outputs use unique `CLASSIFY_*.json` names. Historical ignored artifacts under `logs/LOG_GPT_NORANDAware/` are left untouched.
+- Benchmark output pattern: `logs/RUN_<number>_<UTC timestamp>_<UUID prefix>.json`; classification-only outputs use analogous unique `CLASSIFY_*.json` names. Historical `logs/RUN_0.json` and ignored artifacts under `logs/LOG_GPT_NORANDAware/` are left untouched.
 
 These are configuration-shape examples, not provider-specific application defaults. Model identifiers must be replaced for the selected endpoints. The live program requires a user-created ignored `config.toml` and has no fallback constants for these values.
 
@@ -653,6 +653,15 @@ These are proposals, not authorization to edit production code:
 - Each CVE artifact entry now includes content-free per-attempt audit records, aggregates by stage, and a CVE budget snapshot. Run-level aggregates include requests, retries, repairs, token source/usage, pacing, retry delay, latency, and shared budget use.
 - Terminal entries preserve accumulated warnings and small content-free partial-stage counts. Inactive motivation/confidence values now consistently serialize as `{}`, and monotonic per-CVE timing is named `duration_seconds`.
 - Added offline coverage for run short-circuiting, CVE token preflight, pacing versus retry delay, deadline-aware retry cancellation, provider versus estimated token usage, repair counts, safe headers/request IDs, and absence of prompt/response/secret material. All 113 offline tests and the full static gate pass.
+
+### 2026-09-20 — Atomic schema-versioned run artifacts
+
+- Run artifacts now declare `schema_version: 1`, use UUID run identity, retain the pipeline stage list separately, and record UTC start/completion timestamps plus monotonic duration. Benchmark `run_number` remains zero-based.
+- Metadata includes prompt/schema versions, taxonomy identity, Git revision/dirty state, installed direct-dependency versions, and a SHA-256 configuration fingerprint computed after removing API keys.
+- Benchmark and classification filenames contain UTC timestamps and UUID prefixes. A new run never targets an existing artifact, preserving the historical `logs/RUN_0.json` without special-case behavior.
+- Checkpoints are serialized to a same-directory temporary file, flushed, `fsync`ed, and atomically replaced. Failed serialization removes the temporary file and leaves the preceding checkpoint parseable.
+- README, tracked configuration comments, implementation report, and repository guidance now describe the active reliability behavior and explicitly deferred caching/provenance/concurrency work.
+- The completed implementation passes 116 offline tests plus compilation, lock consistency, installed dependency consistency, and whitespace checks before live validation.
 
 ## Notes maintenance checklist
 
