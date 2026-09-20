@@ -24,11 +24,13 @@ class ReferenceWarningTests(unittest.TestCase):
     def test_failed_scrape_records_warning_and_keeps_successful_reference(self):
         urls = ["https://failed.example.test", "https://usable.example.test"]
 
-        def fetch(url):
-            return None if url == urls[0] else "downloaded page"
+        def fetch(url, **_kwargs):
+            if url == urls[0]:
+                raise TimeoutError("download failed")
+            return b"downloaded page"
 
         with (
-            patch("Graph.Nodes.scrapers.trafilatura.fetch_url", side_effect=fetch),
+            patch("Graph.Nodes.scrapers._download_reference", side_effect=fetch),
             patch(
                 "Graph.Nodes.scrapers.trafilatura.extract",
                 return_value="Usable page text",

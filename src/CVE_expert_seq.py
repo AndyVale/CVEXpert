@@ -394,6 +394,26 @@ def build_pipeline(runtime_config: RuntimeConfig, taxonomy: Taxonomy):
     configured_scraper = partial(
         extract_md_trafilatura,
         max_pages=runtime_config.references.max_pages,
+        max_attempts=runtime_config.references.max_attempts,
+        connect_timeout_seconds=runtime_config.references.connect_timeout_seconds,
+        read_timeout_seconds=runtime_config.references.read_timeout_seconds,
+        max_redirects=runtime_config.references.max_redirects,
+        max_bytes_per_reference=runtime_config.references.max_bytes_per_reference,
+        max_bytes_per_cve=runtime_config.references.max_bytes_per_cve,
+        max_extracted_chars_per_reference=(
+            runtime_config.references.max_extracted_chars_per_reference
+        ),
+        max_extracted_chars_per_cve=(
+            runtime_config.references.max_extracted_chars_per_cve
+        ),
+        retry_policy=RetryPolicy(
+            max_attempts=runtime_config.references.max_attempts,
+            initial_backoff_seconds=retry_settings.initial_backoff_seconds,
+            max_backoff_seconds=retry_settings.max_backoff_seconds,
+            max_retry_after_seconds=retry_settings.max_retry_after_seconds,
+        ),
+        request_pacer=MinimumIntervalPacer(0.0),
+        session=requests.Session(),
     )
     configured_scraper.__name__ = extract_md_trafilatura.__name__
 

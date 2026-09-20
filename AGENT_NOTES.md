@@ -494,6 +494,13 @@ These are proposals, not authorization to edit production code:
 - Added reusable URL normalization for the reference trust boundary. Public-address resolution is applied by the scraper unit rather than during NVD parsing.
 - The complete offline suite passes with 96 tests; compilation, lock validation, installed dependency checks, and whitespace checks pass.
 
+### 2026-09-20 — Reference trust boundary and limits
+
+- Replaced Trafilatura's implicit downloader with a shared streaming `requests.Session`; Trafilatura now receives only already-bounded bytes for extraction.
+- Reference fetching revalidates every redirect, rejects credentials and non-public address resolution, permits an explicit textual content-type set, applies connect/read timeouts and repository retries, and enforces declared plus streamed byte limits.
+- Per-reference and per-CVE extracted-character limits produce explicit degraded warnings and deterministic truncation. Ranked sequential processing and the successful-page limit remain unchanged.
+- The complete offline suite passes with 102 tests; compilation, lock validation, installed dependency checks, and whitespace checks pass.
+
 ### 2026-08-29 — Initial exploration and review
 
 - Read the current README and every Python file on `main`.
