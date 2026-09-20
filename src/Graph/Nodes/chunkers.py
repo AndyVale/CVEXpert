@@ -198,7 +198,9 @@ class SemanticChunkerNode:
                  embed_model, 
                  breakpoint_threshold_type: str = "percentile", 
                  breakpoint_threshold_amount: float = 25.0,
-                 number_of_chunks: int = None):
+                 number_of_chunks: int = None,
+                 max_chunks_per_reference: int = 256,
+                 max_chunks_per_cve: int = 1024):
         """
         Initializes the Semantic Chunker with configurable parameters.
 
@@ -214,6 +216,8 @@ class SemanticChunkerNode:
         self.breakpoint_threshold_type = breakpoint_threshold_type
         self.breakpoint_threshold_amount = breakpoint_threshold_amount
         self.number_of_chunks = number_of_chunks
+        self.max_chunks_per_reference = max_chunks_per_reference
+        self.max_chunks_per_cve = max_chunks_per_cve
 
         # The splitter is initialized once with the provided parameters
         self.splitter = SemanticChunker(
@@ -240,6 +244,7 @@ class SemanticChunkerNode:
         focus_metadata: dict[str, dict[str, int]] = {}
         warnings = list(state.get("pipeline_warnings", []))
         initial_warning_count = len(warnings)
+        total_chunks = 0
         LOGGER.debug(
             "Semantic chunking started: pages=%s threshold=%s/%s",
             len(pages),
@@ -276,7 +281,32 @@ class SemanticChunkerNode:
                 chunks = self.splitter.split_text(focused_text)
                 if not chunks:
                     raise ValueError("Chunker returned no chunks")
+                allowed_chunks = min(
+                    self.max_chunks_per_reference,
+                    self.max_chunks_per_cve - total_chunks,
+                )
+                if allowed_chunks <= 0:
+                    warning = make_pipeline_warning(
+                        stage="chunk",
+                        source=url,
+                        error=ValueError("CVE chunk limit exhausted"),
+                        safe_message="Remaining references were skipped after the CVE chunk limit",
+                    )
+                    warnings.append(warning)
+                    report_warning(LOGGER, warning, ValueError("CVE chunk limit exhausted"))
+                    break
+                if len(chunks) > allowed_chunks:
+                    chunks = chunks[:allowed_chunks]
+                    warning = make_pipeline_warning(
+                        stage="chunk",
+                        source=url,
+                        error=ValueError("Semantic chunk limit exceeded"),
+                        safe_message="Semantic chunks were truncated by the configured limit",
+                    )
+                    warnings.append(warning)
+                    report_warning(LOGGER, warning, ValueError("Semantic chunk limit exceeded"))
                 chunks_dict[url] = chunks
+                total_chunks += len(chunks)
             except Exception as error:
                 chunks_dict[url] = []
                 warning = make_pipeline_warning(

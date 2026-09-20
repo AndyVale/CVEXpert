@@ -56,6 +56,30 @@ class ReferenceFocusTests(unittest.TestCase):
             {"original_chars": len(page), "focused_chars": len(focused)},
         )
 
+    def test_semantic_chunker_enforces_reference_and_cve_chunk_limits(self):
+        node = SemanticChunkerNode(
+            embed_model=object(),
+            max_chunks_per_reference=2,
+            max_chunks_per_cve=3,
+        )
+        with (
+            patch.object(node.splitter, "split_text", return_value=["a", "b", "c", "d"]),
+            patch("Graph.Nodes.chunkers.report_warning"),
+        ):
+            state = node(
+                {
+                    "cve_id": "CVE-2024-0001",
+                    "nvd_references_pages": {
+                        "https://one.example": "first page",
+                        "https://two.example": "second page",
+                    },
+                }
+            )
+
+        self.assertEqual(state["nvd_references_chunks"]["https://one.example"], ["a", "b"])
+        self.assertEqual(state["nvd_references_chunks"]["https://two.example"], ["a"])
+        self.assertEqual(len(state["pipeline_warnings"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

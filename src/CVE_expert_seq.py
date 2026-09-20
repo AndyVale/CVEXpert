@@ -326,6 +326,10 @@ def build_pipeline(runtime_config: RuntimeConfig, taxonomy: Taxonomy):
         breakpoint_threshold_amount=(
             runtime_config.semantic_chunker.breakpoint_threshold_amount
         ),
+        max_chunks_per_reference=(
+            runtime_config.semantic_chunker.max_chunks_per_reference
+        ),
+        max_chunks_per_cve=runtime_config.semantic_chunker.max_chunks_per_cve,
     )
 
     cosine_filter = CosineFilterNode(

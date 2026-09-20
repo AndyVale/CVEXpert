@@ -1,7 +1,8 @@
 from tqdm import tqdm
 import numpy as np
-from Graph.errors import PipelineStageError
-from Graph.reporting import get_logger
+from Graph.audit import BudgetExceeded
+from Graph.errors import PipelineStageError, make_pipeline_warning
+from Graph.reporting import get_logger, report_warning
 from Graph.state import CVEClassifierState
 
 
@@ -90,6 +91,7 @@ class CosineFilterNode:
         """
         references_chunks = state.get("nvd_references_chunks", {})
         filtered_results = {}
+        warnings = list(state.get("pipeline_warnings", []))
 
         if not references_chunks:
              return {**state, "nvd_filtered_chunks": {}}
@@ -108,19 +110,30 @@ class CosineFilterNode:
                 self.query_embedding = _normalize_query_embedding(
                     self.embed_model.embed_query(self.query)
                 )
-            for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
-                if not chunks:
-                    filtered_results[url] = []
-                    continue
+        except Exception as error:
+            raise PipelineStageError(
+                stage="filter",
+                cve_id=cve_id,
+                error=error,
+                safe_message="Query embedding failed",
+                partial_state={**state, "pipeline_warnings": warnings},
+            ) from error
 
-                # Vectorize chunks using LangChain's embed_documents method
+        successful_references = 0
+        failed_references = 0
+        last_reference_error: BaseException | None = None
+        for url, chunks in tqdm(references_chunks.items(), "Filtering chunks using cosine"):
+            if not chunks:
+                filtered_results[url] = []
+                continue
+
+            try:
                 chunk_embeddings = _normalize_document_embeddings(
                     self.embed_model.embed_documents(chunks),
                     document_count=len(chunks),
                     embedding_dimension=self.query_embedding.shape[0],
                 )
-
-                # Both operands are L2-normalized, so their dot product is cosine similarity.
+                successful_references += 1
                 similarities = np.dot(chunk_embeddings, self.query_embedding)
 
                 final_content = []
@@ -134,14 +147,45 @@ class CosineFilterNode:
                         if not gap_added:
                             final_content.append("...")
                             gap_added = True
-
                 filtered_results[url] = final_content
-        except Exception as error:
+            except BudgetExceeded as error:
+                raise PipelineStageError(
+                    stage="filter",
+                    cve_id=cve_id,
+                    error=error,
+                    safe_message="Filtering budget exhausted",
+                    partial_state={
+                        **state,
+                        "nvd_filtered_chunks": filtered_results,
+                        "pipeline_warnings": warnings,
+                    },
+                ) from error
+            except Exception as error:
+                failed_references += 1
+                last_reference_error = error
+                warning = make_pipeline_warning(
+                    stage="filter",
+                    source=url,
+                    error=error,
+                    safe_message="Reference embedding or cosine filtering failed",
+                )
+                warnings.append(warning)
+                report_warning(LOGGER, warning, error)
+
+        if failed_references and successful_references == 0:
+            error = last_reference_error or RuntimeError(
+                "All non-empty references failed during filtering"
+            )
             raise PipelineStageError(
                 stage="filter",
                 cve_id=cve_id,
                 error=error,
-                safe_message="Embedding or cosine filtering failed",
+                safe_message="No usable reference remained after filtering failures",
+                partial_state={
+                    **state,
+                    "nvd_filtered_chunks": filtered_results,
+                    "pipeline_warnings": warnings,
+                },
             ) from error
 
         retained_chunk_count = sum(
@@ -157,8 +201,11 @@ class CosineFilterNode:
             input_chunk_count,
         )
 
-        return {**state, 
-                "nvd_filtered_chunks": filtered_results}
+        return {
+            **state,
+            "nvd_filtered_chunks": filtered_results,
+            "pipeline_warnings": warnings,
+        }
 
 
 class CrossEncoderFilterNode:

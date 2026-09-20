@@ -19,7 +19,7 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 - Semantic chunking now narrows only very large multi-CVE indexes around the requested identifier while retaining the full extracted page and logging character counts.
 - `IMPLEMENTATION_REPORT.md` records the complete fixture/CLI migration, live investigation, measured performance change, limitations, and recommended follow-up work.
 - Benchmark mode prints a final table comparing expected and predicted labels with per-CVE and aggregate metrics plus coverage; classification-only mode does not print scores.
-- Reliability hardening is in progress. The first unit adds backward-compatible timeout/retry/budget defaults, repository-owned retry classification, monotonic request/token/time ledgers, request audit aggregation, and direct `httpx` metadata.
+- Reliability hardening is in progress. Repository-owned retry/budget foundations, strict NVD parsing, bounded public-only reference acquisition, semantic chunk caps, and per-reference filter recovery are implemented. Model repair/telemetry and atomic versioned artifacts remain in this tranche.
 
 ## Durable user decisions
 
@@ -52,6 +52,8 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
 25. `[fixtures].taxonomy_file` is required; `[fixtures].expected_classification_file` is optional and loaded only with `--benchmark`. Positional CVE IDs are always required. With `--benchmark`, each requested ID must have an expected case; unrequested cases are ignored and the requested subset is scored in CLI order.
 26. `[classification].max_input_tokens` is an approximate rendered prompt and schema budget, estimated as `ceil(1.2 × UTF-8 bytes ÷ 3)`. The tracked example uses 12,000; provider tokenization may differ.
 27. `--benchmark` should finish with a console table that makes each requested CVE's expected and predicted labels, per-CVE scores, aggregate scores, and coverage directly visible. Terminal failures stay in the table with unavailable metrics rather than being omitted.
+28. The 2026-09-20 reliability tranche keeps pipeline order and classification semantics unchanged. Cost accounting, cache/resume, source-excerpt provenance, hierarchy-aware routing, batching/concurrency, large-body log deduplication, and dormant-code cleanup are explicitly deferred.
+29. Reliability budgets use tokens rather than monetary cost. Existing ignored `config.toml` files must remain valid through active defaults, and live validation must preserve the existing `logs/RUN_0.json` while reporting the actually selected hierarchical taxonomy.
 
 ## Repository understanding
 
@@ -627,6 +629,14 @@ These are proposals, not authorization to edit production code:
 - Benchmark completion now prints one progress-safe aligned table in normal and verbose modes. Rows preserve requested CVE order and show status, expected labels, predicted labels, exact-match accuracy, micro precision, micro recall, and micro F1.
 - The final row shows aggregate metrics. A coverage line shows successful, degraded, failed, scored/total, and completeness values. Terminal failures remain visible with `—` score cells; classification-only runs do not print the table.
 - All 88 offline tests, compilation, lock consistency, installed dependency consistency, and whitespace checks passed. No live service calls were needed for this output-only change.
+
+### 2026-09-20 — Reliability hardening through filtering
+
+- Added backward-compatible resilience defaults, a shared three-attempt full-jitter retry executor, monotonic CVE/run request-token-time ledgers, and per-attempt audit aggregation. `httpx` is now a direct dependency; SDK retries will be disabled when the model clients are wired into these controls.
+- Hardened NVD lookup with a shared session, explicit connect/read timeouts, optional API-key support, repository retries, exact returned-ID validation, explicit English-description selection, independently validated references, URL normalization, ordered deduplication, and partial warning preservation.
+- Replaced implicit page downloading with bounded streaming fetches. Initial and redirected URLs are limited to credential-free HTTP(S) destinations that resolve only to global addresses, redirects are manually capped and revalidated, content types are allowlisted, declared/streamed byte limits are enforced, and extracted text is bounded per reference and CVE.
+- Added deterministic per-reference and per-CVE semantic chunk caps. Filtering keeps query embedding failure terminal, isolates document embedding/cosine failures by reference, preserves successful references and warnings, and becomes terminal only when every non-empty reference fails.
+- The four commits through this point pass 104 offline tests plus compilation, lock consistency, installed dependency consistency, and whitespace checks. No live service call has been made during this tranche yet.
 
 ## Notes maintenance checklist
 

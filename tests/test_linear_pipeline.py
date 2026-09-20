@@ -342,6 +342,8 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(scraper_arguments["max_attempts"], 3)
         self.assertEqual(scraper_arguments["max_redirects"], 5)
         self.assertEqual(scraper_arguments["max_bytes_per_reference"], 5 * 1024 * 1024)
+        self.assertEqual(pipeline.steps[2].func.max_chunks_per_reference, 256)
+        self.assertEqual(pipeline.steps[2].func.max_chunks_per_cve, 1024)
         self.assertEqual(
             pipeline.steps[4].func.labels_descriptions,
             TEST_TAXONOMY.root_descriptions,

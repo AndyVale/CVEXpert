@@ -157,6 +157,33 @@ class CosineFilterTests(unittest.TestCase):
                 }
             )
 
+    def test_one_reference_embedding_failure_is_degraded_not_terminal(self):
+        class PartialEmbeddings:
+            def embed_query(self, _query):
+                return [1.0, 0.0]
+
+            def embed_documents(self, documents):
+                if documents == ["bad"]:
+                    raise RuntimeError("temporary reference failure")
+                return [[1.0, 0.0] for _document in documents]
+
+        node = CosineFilterNode(
+            embed_model=PartialEmbeddings(), query="query", threshold=0.5
+        )
+        state = node(
+            {
+                "cve_id": "CVE-2024-0001",
+                "nvd_references_chunks": {
+                    "https://bad.example": ["bad"],
+                    "https://good.example": ["good"],
+                },
+            }
+        )
+
+        self.assertNotIn("https://bad.example", state["nvd_filtered_chunks"])
+        self.assertEqual(state["nvd_filtered_chunks"]["https://good.example"], ["good"])
+        self.assertEqual(state["pipeline_warnings"][0]["stage"], "filter")
+
 
 if __name__ == "__main__":
     unittest.main()
