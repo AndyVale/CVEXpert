@@ -49,7 +49,7 @@ def one_label_budget() -> int:
 class TaxonomyClassifierTests(unittest.TestCase):
     def test_groups_fit_budget_and_prune_ancestor_across_calls(self):
         model = RecordingModel(
-            [{"labels": ["Parent"]}, {"labels": ["Child"]}, {"labels": ["NONE"]}]
+            [{"labels": ["Parent"]}, {"labels": ["Child"]}, {"labels": ["no_matching_label"]}]
         )
         node = CVEClassifierNode(model, TAXONOMY, one_label_budget())
         groups = node._groups(STATE["cve_id"], STATE["rag"])
@@ -69,17 +69,17 @@ class TaxonomyClassifierTests(unittest.TestCase):
         self.assertIn("Parent (Parent family)", model.prompts[1])
         self.assertEqual(
             model.schemas[1]["properties"]["labels"]["items"]["enum"],
-            ["Child", "NONE"],
+            ["Child", "no_matching_label", "not_enough_information"],
         )
 
     def test_all_groups_none_yields_one_none(self):
-        model = RecordingModel([{"labels": ["NONE"]}] * 3)
+        model = RecordingModel([{"labels": ["no_matching_label"]}] * 3)
         node = CVEClassifierNode(model, TAXONOMY, one_label_budget())
 
-        self.assertEqual(node(STATE)["cve_labels"], ["NONE"])
+        self.assertEqual(node(STATE)["cve_labels"], ["no_matching_label"])
 
     def test_group_failure_is_terminal(self):
-        model = RecordingModel([{"labels": ["NONE"]}, RuntimeError("failed")])
+        model = RecordingModel([{"labels": ["no_matching_label"]}, RuntimeError("failed")])
         node = CVEClassifierNode(model, TAXONOMY, one_label_budget())
 
         with self.assertRaises(PipelineStageError) as raised:

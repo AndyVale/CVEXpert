@@ -1,3 +1,5 @@
+Current outcome policy (2026-11-06): `NONE` below describes historical behavior. Live schemas now distinguish `no_matching_label` and `not_enough_information`; see README for aggregation and compatibility.
+
 # JSON fixtures, benchmark CLI, and live pipeline investigation
 
 Date: 2026-09-19

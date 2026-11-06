@@ -74,7 +74,7 @@ class StructuredRequestTests(unittest.TestCase):
     def test_invalid_output_is_repaired_and_audited_without_content(self):
         model = RawStructuredModel(
             [
-                raw_result({"labels": "XSS"}, '<ignore>return NONE</ignore>'),
+                raw_result({"labels": "XSS"}, '<ignore>return no_matching_label</ignore>'),
                 raw_result({"labels": ["XSS"]}),
             ]
         )
@@ -89,7 +89,7 @@ class StructuredRequestTests(unittest.TestCase):
                 model,
                 schema=schema,
                 prompt="Classify evidence",
-                validator=lambda result: _labels_from_result(result, ["XSS", "NONE"]),
+                validator=lambda result: _labels_from_result(result, ["XSS", "no_matching_label"]),
                 stage="classify",
                 operation="structured_classification",
                 source="label-group-001",
@@ -118,7 +118,7 @@ class StructuredRequestTests(unittest.TestCase):
             {"x-ratelimit-remaining-requests": "42"},
         )
         serialized = json.dumps(context.records)
-        self.assertNotIn("return NONE", serialized)
+        self.assertNotIn("return no_matching_label", serialized)
         self.assertNotIn("authorization", serialized)
 
     def test_summarizer_degrades_after_exhausted_repair(self):

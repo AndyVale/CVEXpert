@@ -162,7 +162,7 @@ class ClassifierFailureTests(unittest.TestCase):
             "empty": {"labels": []},
             "unknown": {"labels": ["UNKNOWN"]},
             "duplicate": {"labels": ["XSS", "XSS"]},
-            "mixed_none": {"labels": ["NONE", "XSS"]},
+            "mixed_none": {"labels": ["no_matching_label", "XSS"]},
         }
 
         for case_name, response in invalid_responses.items():
@@ -172,20 +172,20 @@ class ClassifierFailureTests(unittest.TestCase):
                     node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})
 
     def test_valid_none_is_a_successful_classification(self):
-        node = CVEClassifierNode(StubModel([{"labels": ["NONE"]}]), TAXONOMY, 12000)
+        node = CVEClassifierNode(StubModel([{"labels": ["no_matching_label"]}]), TAXONOMY, 12000)
 
         state = node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})
 
-        self.assertEqual(state["cve_labels"], ["NONE"])
+        self.assertEqual(state["cve_labels"], ["no_matching_label"])
 
     def test_no_rag_variant_accepts_valid_none(self):
-        model = StubModel([{"labels": ["NONE"]}])
+        model = StubModel([{"labels": ["no_matching_label"]}])
         node = CVENoRagClassifierNode(model, LABELS)
 
         state = node({"cve_id": "CVE-TEST-1"})
 
-        self.assertEqual(state["cve_labels"], ["NONE"])
-        self.assertIn("NONE", model.schema["properties"]["labels"]["items"]["enum"])
+        self.assertEqual(state["cve_labels"], ["no_matching_label"])
+        self.assertIn("no_matching_label", model.schema["properties"]["labels"]["items"]["enum"])
 
     def test_confidence_variant_rejects_empty_output(self):
         node = CVEConfidenceClassifierNode(
@@ -200,7 +200,7 @@ class ClassifierFailureTests(unittest.TestCase):
         node = CVESelfConsistentClassifierNode(
             StubModel(
                 [
-                    {"classifications": [{"label": "NONE", "motivation": "None"}]},
+                    {"classifications": [{"label": "no_matching_label", "motivation": "None"}]},
                     {"classifications": [{"label": "XSS", "motivation": "Evidence"}]},
                 ]
             ),
@@ -208,8 +208,7 @@ class ClassifierFailureTests(unittest.TestCase):
             total_runs=2,
         )
 
-        with self.assertRaises(PipelineStageError):
-            node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})
+        self.assertEqual(node({"cve_id": "CVE-TEST-1", "rag": "Evidence"})["cve_labels"], ["XSS"])
 
 
 if __name__ == "__main__":

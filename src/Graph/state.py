@@ -37,6 +37,8 @@ class CVEClassifierState(TypedDict, total=False):
     nvd_filtered_chunks: dict[str, list[str]]
     summaries: dict[str, str]
     rag: str
+    classification_groups: list[dict]
+    classification_assessment_complete: bool
     cve_labels: list[str]
     labels_motivation: dict[str, str]
     labels_confidence: dict[str, float]

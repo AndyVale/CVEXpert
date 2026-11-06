@@ -65,7 +65,7 @@ class Taxonomy:
 
     @property
     def all_labels(self) -> list[str]:
-        return [label.id for label in self.labels] + ["NONE"]
+        return [label.id for label in self.labels] + ["no_matching_label", "not_enough_information"]
 
     @property
     def descriptions(self) -> dict[str, str]:
@@ -150,8 +150,8 @@ def load_taxonomy(path: str | Path) -> Taxonomy:
         if any(not isinstance(value, str) or not value.strip() for value in values):
             raise FixtureError(f"Taxonomy label {index} requires id, name, and description")
         label_id, display_name, description = (value.strip() for value in values)
-        if label_id == "NONE":
-            raise FixtureError("NONE is reserved for classifications without a matching label")
+        if label_id in {"NONE", "no_matching_label", "not_enough_information"}:
+            raise FixtureError("no_matching_label is reserved for classifications without a matching label")
         if label_id in ids:
             raise FixtureError(f"Duplicate taxonomy ID: {label_id}")
         parent = entry.get("parent")
@@ -214,10 +214,10 @@ def load_benchmark(path: str | Path, taxonomy: Taxonomy) -> Benchmark:
             raise FixtureError(f"Expected case {cve_id} contains duplicate labels")
         if not set(labels) <= allowed_labels:
             raise FixtureError(f"Expected case {cve_id} contains unsupported labels")
-        if "NONE" in labels and len(labels) != 1:
-            raise FixtureError(f"Expected case {cve_id} combines NONE with labels")
+        if set(labels) & {"no_matching_label", "not_enough_information"} and len(labels) != 1:
+            raise FixtureError(f"Expected case {cve_id} combines no_matching_label with labels")
         for label_id in labels:
-            if label_id != "NONE" and any(
+            if label_id not in {"no_matching_label", "not_enough_information"} and any(
                 ancestor in labels for ancestor in taxonomy.ancestors_of(label_id)
             ):
                 raise FixtureError(f"Expected case {cve_id} combines ancestor and descendant")

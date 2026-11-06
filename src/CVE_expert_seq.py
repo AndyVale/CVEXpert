@@ -299,7 +299,7 @@ def _run_cases(
     if benchmark is not None:
         metadata["run_number"] = run_number
         metadata["expected_classification_file"] = str(benchmark.source_path)
-    log = {"schema_version": 1, "pipeline_metadata": metadata, "cves": {}}
+    log = {"schema_version": 2, "pipeline_metadata": metadata, "cves": {}}
     if benchmark is not None:
         log["aggregated_scores"] = {}
 
@@ -369,6 +369,8 @@ def _run_cases(
                 "summaries": state.get("summaries", {}),
                 "rag_input": state.get("rag", ""),
                 "classification_output": predicted,
+                "classification_groups": state.get("classification_groups", []),
+                "classification_assessment_complete": state.get("classification_assessment_complete", True),
                 "duration_seconds": elapsed,
                 "labels_motivation": state.get("labels_motivation", {}),
                 "labels_confidence": state.get("labels_confidence", {}),
@@ -412,6 +414,8 @@ def _run_cases(
                 "error": details,
                 "error_message": safe_message,
                 "classification_output": ["ERROR"],
+                "classification_groups": partial_state.get("classification_groups", []),
+                "classification_assessment_complete": False,
                 "duration_seconds": time.monotonic() - case_started,
                 "labels_motivation": {},
                 "labels_confidence": {},

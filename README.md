@@ -88,9 +88,9 @@ CVE ID
   -> per-CVE results, with scores in benchmark mode
 ```
 
-The summarizer uses root-label descriptions for broad guidance. The classifier evaluates every label across one or more calls, includes each label's ancestors as context, and retains the most specific supported labels. It returns `NONE` only when no group selects a label. The flat, hierarchical, and hybrid fixtures all use the same linear pipeline; larger sets can require more classifier calls per CVE.
+The summarizer uses root-label descriptions for broad guidance. The classifier evaluates every label across one or more calls, includes each label's ancestors as context, and retains the most specific supported labels. It returns `no_matching_label` only when every group completes with sufficient information and no match. The flat, hierarchical, and hybrid fixtures all use the same linear pipeline; larger sets can require more classifier calls per CVE.
 
-An individual reference scrape, chunk, filter, or summary failure produces a warning and a `degraded` result when usable evidence remains. Query-embedding failure, loss of every non-empty reference during filtering, budget exhaustion, NVD failure, formatting-precondition failure, or classifier failure produces an explicit `error`; operational failures are never converted into a valid-looking `NONE` label. Malformed structured output receives one corrective request. A second malformed summary skips that reference, while a second malformed classification remains terminal.
+An individual reference scrape, chunk, filter, or summary failure produces a warning and a `degraded` result when usable evidence remains. Query-embedding failure, loss of every non-empty reference during filtering, budget exhaustion, NVD failure, formatting-precondition failure, or classifier failure produces an explicit `error`; operational failures are never converted into a valid-looking `no_matching_label` label. Malformed structured output receives one corrective request. A second malformed summary skips that reference, while a second malformed classification remains terminal.
 
 The filter obtains its query embedding during the first CVE that has chunks to filter. If that request fails, the failure is logged for that CVE and later CVEs can retry it. Console diagnostics keep the stage and CVE visible and summarize HTML gateway errors without printing the page body.
 
@@ -116,3 +116,22 @@ occurs. Missing assignments and unavailable definitions are stated explicitly; a
 unreadable catalogue retains identifiers with unavailable definitions. NVD retrieval
 failures remain terminal. Both active LLM stages include this supporting context in
 their rendered input budgets. Associations and catalogue metadata persist in logs.
+
+Classification schemas reserve two exclusive outcomes: `no_matching_label` means
+sufficient information was available to assess the candidates and none was supported;
+`not_enough_information` means the evidence was insufficient. Neither is a custom
+label. Across groups, positive labels win and ancestor removal still applies. With
+no positives, any uncertain group yields `not_enough_information`; only unanimous
+completed no-match groups yield `no_matching_label`. Logs preserve group candidate
+IDs and responses, plus `classification_assessment_complete` (false if any group is
+uncertain). An unprocessed or failed group is a terminal error, with completed group
+records preserved; it never becomes either outcome. Recoverable reference failures
+continue to produce degraded results.
+
+Run artifacts now use schema version 2, classifier schema `cve-labels-v2` and prompt
+`taxonomy-most-specific-v3`. Legacy `NONE` model and benchmark inputs are rejected,
+including after bounded repair: their ambiguity cannot be resolved automatically.
+Historical artifacts are left unchanged; consumers must inspect their schema version.
+No supplied benchmark cases required migration. Outcome IDs are included in metric
+classes, so uncertainty and no-match score distinctly. Identifier/schema validation
+checks structure and membership; it does not establish semantic correctness.

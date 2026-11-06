@@ -32,10 +32,10 @@ Persistent working memory for CVExpert. Read this file with `AGENTS.md` before s
    - a separate, repeatable benchmark/evaluation harness.
 6. The active linear pipeline selects a taxonomy JSON through TOML and supports the provided flat, hierarchical, and hybrid fixtures. It does not use LangGraph.
 7. Preserve each taxonomy's `most_specific` policy: return directly supported mechanisms and omit an ancestor when a selected descendant is present. The classifier groups labels into bounded calls while retaining the linear stage sequence.
-8. `NONE` is mutually exclusive and valid only after successful classification across every group. Do not infer mechanism labels from impacts, preconditions, or companion CVEs.
+8. `no_matching_label` is mutually exclusive and valid only after successful classification across every group. Do not infer mechanism labels from impacts, preconditions, or companion CVEs.
 9. Chat and embedding clients use independently configurable complete OpenAI-compatible base URLs, model identifiers, and credential-variable names. They may share a URL or credential when appropriate. Embedding credential validation can be avoided when resuming from a JSON artifact that already contains a later-stage result such as filtered chunks.
 10. Future replay should resume from explicit named stages (for example, filtered chunks, summaries, or classification context), using a versioned artifact rather than a hard-coded one-off loader.
-11. Operational/model failure is not a classification. `NONE` is valid only after a successful, validated classifier response.
+11. Operational/model failure is not a classification. `no_matching_label` is valid only after a successful, validated classifier response.
 12. Individual reference scrape, chunk, and summary failures are recoverable and make a result `degraded`; NVD, filtering, formatter-precondition, and classifier failures are terminal for that CVE.
 13. The old eight-run benchmark did not calculate an average. It has been replaced with one insertion-order run. The tracked TOML template keeps temperature `0.0` for summarizer and classifier, though local configuration can override it; provider/runtime behavior may still vary.
 14. Partial-run metrics exclude terminal errors but must report coverage and `complete: false`; degraded classifications remain scored.
@@ -123,7 +123,7 @@ Only `cve_id` is required in `CVEClassifierState`; stage outputs are optional. S
 - `PipelineStageError` contains the stage, CVE ID, underlying exception type, and a safe message. Error serialization intentionally omits raw upstream exception messages.
 - NVD request/parsing, document embedding/filtering, formatter preconditions, and classifier invocation/output validation are terminal.
 - Reference scrape, chunk, and summary failures append structured `PipelineWarning` records and retain successful references.
-- Classifier labels must be a non-empty list of allowed unique strings. `NONE` cannot coexist with a real label. These rules apply to active, no-RAG, confidence, and self-consistency variants.
+- Classifier labels must be a non-empty list of allowed unique strings. `no_matching_label` cannot coexist with a real label. These rules apply to active, no-RAG, confidence, and self-consistency variants.
 - A successful state with warnings logs as `degraded`; without warnings it logs as `success`; a terminal exception logs as `error` with compatibility fields `error_message` and `["ERROR"]`.
 - Aggregate metrics score successful and degraded states, exclude errors, and include `total`, `scored`, `successful`, `degraded`, `failed`, and `complete`.
 
@@ -167,7 +167,7 @@ Useful ideas that may be selectively ported to the linear implementation:
 - batched embedding/filter requests across references;
 - batched summarization requests;
 - retry/backoff around NVD HTTP work;
-- explicit error propagation instead of silently predicting `NONE` (ported in the first reliability batch);
+- explicit error propagation instead of silently predicting `no_matching_label` (ported in the first reliability batch);
 - per-origin coordination for concurrent scraping;
 - `zero_division=0` in metric calls (ported in the first reliability batch).
 
@@ -193,8 +193,8 @@ Priority meanings:
 
 Implemented in the first reliability batch:
 
-- Operational/model failures no longer become ordinary `NONE` predictions. Terminal stages raise `PipelineStageError`; reference-local failures become warnings and degraded results.
-- Classifier output validation enforces allowed, non-empty, unique labels and mutual exclusion for `NONE`.
+- Operational/model failures no longer become ordinary `no_matching_label` predictions. Terminal stages raise `PipelineStageError`; reference-local failures become warnings and degraded results.
+- Classifier output validation enforces allowed, non-empty, unique labels and mutual exclusion for `no_matching_label`.
 - Per-CVE logs expose success/degraded/error state, warnings, and structured error details. Aggregate output exposes coverage and cannot mark a partial run complete.
 - Local TOML discovery is repository-root anchored and validation occurs before live client construction. Direct API-key fields superseded the earlier `.env`-based implementation.
 - Query and document embeddings are L2-normalized. Zero document vectors score zero; zero query vectors, non-finite data, count mismatches, and dimension mismatches fail explicitly.
@@ -334,7 +334,7 @@ Approach:
 
 Observed benchmark facts:
 
-- Each supplied benchmark has 50 cases and no `NONE` case; seven cases have multiple labels.
+- Each supplied benchmark has 50 cases and no `no_matching_label` case; seven cases have multiple labels.
 - The flat set covers eight of nine labels, the hierarchical set 18 of 39, and the hybrid set 22 of 84.
 - The availability-and-resources family is unrepresented; many specific labels remain untested.
 - Live CVE evidence can change, and CVE-ID memorization can still mask retrieval quality.
@@ -342,7 +342,7 @@ Observed benchmark facts:
 Impact:
 
 - Aggregate micro-F1 can hide poor performance on rare labels.
-- `NONE` handling cannot be validated by the supplied expected cases.
+- `no_matching_label` handling cannot be validated by the supplied expected cases.
 - Prompt/model changes can overfit a small, mutable live benchmark.
 
 Approach:
@@ -581,17 +581,17 @@ These are proposals, not authorization to edit production code:
 
 - Researched all 20 fixtures against the current NVD records plus vendor advisories and primary technical analyses. Treated the `CVE_TEST` values as ground truth and rewrote every evidence comment so it agrees with the value.
 - Applied the flat-taxonomy rule that every directly supported matching label is included, while consequences and exploit preconditions do not manufacture mechanisms: RCE alone is not CodeInjection, unauthenticated reach alone is not AccessControl, and companion CVEs are classified separately.
-- Changed 13 fixtures. Notable corrections include `CVE-2025-59145` to `NONE`, Log4Shell gaining the Apache CNA's CWE-400/ResourceExhaustion classification, Heartbleed losing the logical InfoLeak label, FortiWeb losing CommandInjection, ProxyShell losing UntrustedDeserialization, ProxyLogon retaining only UntrustedDeserialization, and IngressNightmare retaining only AccessControl.
-- The resulting fixture has 40 assignments across 20 cases: 13 InputValidation, 6 AccessControl, 4 each CodeInjection and UntrustedDeserialization, 3 PathTraversal, 2 each CommandInjection and BufferOverflow, one each SSRF, OutOfBoundsRead, UseAfterFree, InfoLeak, ResourceExhaustion, and NONE, and zero XSS, SQLi, or CSRF examples.
-- Added fixture-invariant tests for nonempty, unique, allowed labels and mutually exclusive `NONE`. All 57 offline tests, Python compilation, lock consistency, installed dependency consistency, and whitespace checks passed.
+- Changed 13 fixtures. Notable corrections include `CVE-2025-59145` to `no_matching_label`, Log4Shell gaining the Apache CNA's CWE-400/ResourceExhaustion classification, Heartbleed losing the logical InfoLeak label, FortiWeb losing CommandInjection, ProxyShell losing UntrustedDeserialization, ProxyLogon retaining only UntrustedDeserialization, and IngressNightmare retaining only AccessControl.
+- The resulting fixture has 40 assignments across 20 cases: 13 InputValidation, 6 AccessControl, 4 each CodeInjection and UntrustedDeserialization, 3 PathTraversal, 2 each CommandInjection and BufferOverflow, one each SSRF, OutOfBoundsRead, UseAfterFree, InfoLeak, ResourceExhaustion, and no_matching_label, and zero XSS, SQLi, or CSRF examples.
+- Added fixture-invariant tests for nonempty, unique, allowed labels and mutually exclusive `no_matching_label`. All 57 offline tests, Python compilation, lock consistency, installed dependency consistency, and whitespace checks passed.
 
 ### 2026-09-18 — Configured JSON taxonomies and optional benchmark mode
 
 - Replaced the hard-coded Python taxonomy and 20-case dataset with byte-for-byte copies of three supplied JSON pairs under `fixtures/flat`, `fixtures/hierarchical`, and `fixtures/hybrid`. They contain 9, 39, and 84 labels respectively, and 50 cases each.
-- Added typed fixture loading with parent/cycle checks, `most_specific` validation, reserved `NONE` handling, case/provenance validation, and canonical JSON SHA-256 pair verification. The attached Markdown readmes were treated as contextual data, not implementation instructions.
+- Added typed fixture loading with parent/cycle checks, `most_specific` validation, reserved `no_matching_label` handling, case/provenance validation, and canonical JSON SHA-256 pair verification. The attached Markdown readmes were treated as contextual data, not implementation instructions.
 - Added required taxonomy and optional expected-classification paths in TOML; the ignored local configuration was extended without changing existing credential values. The tracked example selects the flat pair.
 - Split CLI use into positional CVE classification with no scores and explicit `--benchmark` evaluation. Both modes share the linear pipeline; benchmark logs keep `RUN_N.json`, while classification logs receive unique names.
-- The summarizer now receives root-label guidance. The classifier estimates rendered prompt plus schema size under `[classification].max_input_tokens`, groups labels deterministically, and removes selected ancestors across groups. A group failure is terminal; `NONE` requires all groups to select no label.
+- The summarizer now receives root-label guidance. The classifier estimates rendered prompt plus schema size under `[classification].max_input_tokens`, groups labels deterministically, and removes selected ancestors across groups. A group failure is terminal; `no_matching_label` requires all groups to select no label.
 - At this snapshot, all 76 offline tests pass; compilation, lock consistency, installed dependency consistency, whitespace, selected local configuration, and byte-for-byte fixture checks pass. No live NVD, reference, embedding, or chat calls were made.
 
 ### 2026-09-18 — CLI-selected benchmark subsets
@@ -689,3 +689,9 @@ When resuming work:
 - Bundled authoritative MITRE weakness names/descriptions with XML hash and release provenance. NVD associations retain source/type, normalize/deduplicate numeric IDs, exclude placeholders, and enter summarizer/classifier budgets deterministically. No new runtime network calls.
 - Missing assignments/definitions are explicit; catalogue file failures retain associations without invented definitions. Existing NVD failures remain terminal.
 - Verification: 118 offline tests passed; compileall, lock check, dependency check and diff whitespace check passed. MITRE release 5.0 (2026-10-28).
+
+## 2026-11-06 — Explicit classification outcomes
+- Replaced ambiguous NONE in live schemas with exclusive no_matching_label and not_enough_information. Legacy NONE is rejected, not guessed or remapped; historical artifacts remain untouched.
+- Positive groups survive negatives/uncertainty; without positives any uncertainty wins, otherwise all completed negatives yield no-match. Ancestor removal preserved. Group records/assessment completeness persist, including completed groups on terminal failure. Artifact schema is now 2; classifier schema/prompt versions incremented.
+- Validation establishes structural membership only, not semantic correctness. No live model validation or benchmark quality measurement authorized/performed.
+- Verification: all 122 offline tests passed; compileall, uv lock --check, uv pip check and git diff --check passed. Catalogue updates remain manual; no live services called for validation.

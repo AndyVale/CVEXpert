@@ -4,7 +4,6 @@ from typing import Any
 import requests
 
 from Definitions.cwe import recorded_cwe_context
-from Definitions.cwe import recorded_cwe_context
 from Graph.audit import request_scope
 from Graph.errors import PipelineStageError, make_pipeline_warning
 from Graph.reporting import get_logger

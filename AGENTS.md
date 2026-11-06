@@ -44,14 +44,14 @@ CVExpert classifies CVEs into project-defined security labels by collecting NVD 
 4. `CosineFilterNode` embeds chunks and retains chunks above a relevance threshold.
 5. `CVEAwareSummarizerNode` asks the chat model for one structured summary per retained reference.
 6. `formatter` combines the NVD description and summaries into the classifier context stored as `rag`.
-7. `CVEClassifierNode` evaluates the configured labels in token-bounded groups, removes selected ancestors of selected descendants, and returns `NONE` only when no group selects a label.
+7. `CVEClassifierNode` evaluates the configured labels in token-bounded groups, removes selected ancestors of selected descendants, and returns `no_matching_label` only when every group completes with sufficient information and no match.
 8. `run_evaluation` compares predictions with the selected JSON cases and writes metrics; `run_classification` handles explicit CVE IDs without ground-truth scoring.
 
 `main()` requires explicit CVE IDs, loads and validates `config.toml` and the selected JSON before client construction, builds the pipeline once, then processes the requested CVEs in CLI order. With `--benchmark`, every requested ID must exist in the expected-classification JSON and only those cases are scored; unrequested JSON cases are ignored. The tracked template sets both chat temperatures to `0.0`; a local configuration can change them. Temperature zero reduces avoidable variability but cannot guarantee provider-level determinism. The live run is sequential and still has no persistent cache/resume or batching. NVD, reference, embedding, and chat operations use repository-owned bounded retries, explicit timeouts, per-service pacing, and shared CVE/run request-token-time budgets. SDK model retries are disabled.
 
 The CLI requires positional CVE IDs and accepts optional `--benchmark` and `-v`/`--verbose`. Normal mode shows lifecycle messages, tqdm progress, errors, and completion; benchmark mode also prints a final comparison table with per-CVE expected/predicted labels and metrics, aggregate metrics, and coverage. Classification-only mode has no score table. Verbose mode adds recoverable warnings, a secret-safe configuration table before client construction, and stage-level count summaries. Verbose recoverable warnings are printed immediately through `tqdm.write()` and remain recorded in JSON in both modes. Interactive warnings are yellow and errors red; `NO_COLOR` disables ANSI output. Top-level failures are concise and return a nonzero CLI status without a traceback wall.
 
-Terminal NVD, query-embedding/all-reference filtering, budget, formatter-precondition, or classifier failures raise `PipelineStageError` or a runner budget error; they must never be converted to `NONE`. A successful, validated model response may return `["NONE"]`. Individual reference scrape, chunk, document-filter, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`. Structured outputs receive one bounded repair request; exhausted summarizer repair degrades one reference and exhausted classifier repair is terminal.
+Terminal NVD, query-embedding/all-reference filtering, budget, formatter-precondition, or classifier failures raise `PipelineStageError` or a runner budget error; they must never be converted to `no_matching_label`. A successful, validated model response may return `["no_matching_label"]`. Individual reference scrape, chunk, document-filter, or summary failures are recoverable: stages keep usable references, append `PipelineWarning` records, and the runner reports the CVE as `degraded`. Structured outputs receive one bounded repair request; exhausted summarizer repair degrades one reference and exhausted classifier repair is terminal.
 
 `CosineFilterNode` requests and caches its query embedding during the first CVE with chunks. A failed request becomes a per-CVE filter error, leaving later CVEs able to retry. HTML gateway error bodies are summarized in console diagnostics, with the stage and CVE shown first.
 
@@ -168,3 +168,10 @@ Run live NVD, scraping, embedding, or LLM workflows only when the user explicitl
 - open questions, blockers, and recommended next actions.
 
 Keep durable facts and decisions concise, date material progress, remove stale claims when they are disproved, and never store secret values. Update the notes in the same logical commit as the work that changed project understanding when practical.
+
+Classification outcome update (2026-11-06): both `no_matching_label` and
+`not_enough_information` are reserved exclusive outcomes. Only all-completed,
+sufficient-information negative groups yield no-match; any uncertain group yields
+insufficiency in the absence of positives. Positives survive negative/uncertain
+groups, with group records retaining uncertainty. Failed/unprocessed groups remain
+terminal errors. Live `NONE` responses and legacy benchmark annotations are rejected.

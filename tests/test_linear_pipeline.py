@@ -510,7 +510,7 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(log["aggregated_scores"]["f1"], 1.0)
         self.assertEqual(log["aggregated_scores"]["accuracy"], 1.0)
-        self.assertEqual(log["schema_version"], 1)
+        self.assertEqual(log["schema_version"], 2)
         UUID(log["pipeline_metadata"]["run_id"])
         self.assertEqual(log["pipeline_metadata"]["run_number"], 0)
         self.assertNotIn("RUN_N", log["pipeline_metadata"])
@@ -519,7 +519,7 @@ class RunnerTests(unittest.TestCase):
         self.assertGreaterEqual(log["pipeline_metadata"]["duration_seconds"], 0)
         self.assertEqual(
             log["pipeline_metadata"]["prompt_versions"],
-            {"summarizer": "cve-aware-v2", "classifier": "taxonomy-most-specific-v2"},
+            {"summarizer": "cve-aware-v2", "classifier": "taxonomy-most-specific-v3"},
         )
         self.assertEqual(len(log["pipeline_metadata"]["configuration_fingerprint"]), 64)
         self.assertIn("httpx", log["pipeline_metadata"]["direct_dependency_versions"])

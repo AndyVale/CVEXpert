@@ -44,7 +44,7 @@ class JsonFixtureTests(unittest.TestCase):
                 self.assertTrue(any(label.parent for label in taxonomy.labels))
                 for case in benchmark.cases:
                     for label in case.labels:
-                        if label != "NONE":
+                        if label != "no_matching_label":
                             self.assertFalse(
                                 set(taxonomy.ancestors_of(label)) & set(case.labels)
                             )
@@ -162,9 +162,9 @@ class JsonFixtureTests(unittest.TestCase):
             with self.assertRaisesRegex(FixtureError, "unsupported labels"):
                 load_benchmark(path, taxonomy)
 
-            payload["cases"][0]["labels"] = ["NONE", "AccessControl"]
+            payload["cases"][0]["labels"] = ["no_matching_label", "AccessControl"]
             path.write_text(json.dumps(payload), encoding="utf-8")
-            with self.assertRaisesRegex(FixtureError, "combines NONE"):
+            with self.assertRaisesRegex(FixtureError, "combines no_matching_label"):
                 load_benchmark(path, taxonomy)
 
 
