@@ -3,6 +3,8 @@ from typing import Any
 
 import requests
 
+from Definitions.cwe import recorded_cwe_context
+from Definitions.cwe import recorded_cwe_context
 from Graph.audit import request_scope
 from Graph.errors import PipelineStageError, make_pipeline_warning
 from Graph.reporting import get_logger
@@ -164,9 +166,10 @@ def nvd_caller(
 
         with request_scope(stage="nvd", operation="lookup", source=cve_id):
             resp = execute_with_retry(fetch, policy=policy, pacer=request_pacer)
-        description, reranked_refs, parsing_warnings = _parse_nvd_response(
-            resp.json(), cve_id
-        )
+        data = resp.json()
+        description, reranked_refs, parsing_warnings = _parse_nvd_response(data, cve_id)
+        record = next(e["cve"] for e in data["vulnerabilities"] if e.get("cve", {}).get("id") == cve_id)
+        cwe = recorded_cwe_context(record.get("weaknesses", []))
         warnings.extend(parsing_warnings)
         LOGGER.debug(
             "NVD retrieval completed for %s: references=%s description_chars=%s",
@@ -178,6 +181,8 @@ def nvd_caller(
         return {
             **state,
             "nvd_description": description,
+            **cwe,
+            **cwe,
             "nvd_url_references": reranked_refs,
             "pipeline_warnings": warnings,
         }

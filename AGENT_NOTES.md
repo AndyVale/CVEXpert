@@ -683,3 +683,9 @@ When resuming work:
 6. Add newly discovered risks with evidence, impact, and proposed approach.
 7. Remove or correct claims disproved by code/tests.
 8. Never record secret values, private tokens, or sensitive log content.
+
+## 2026-11-06 — Recorded CWE context
+- Reviewed fixed linear pipeline, NVD parser, inline prompts, grouped classifier schemas/validators, runner persistence and offline tests.
+- Bundled authoritative MITRE weakness names/descriptions with XML hash and release provenance. NVD associations retain source/type, normalize/deduplicate numeric IDs, exclude placeholders, and enter summarizer/classifier budgets deterministically. No new runtime network calls.
+- Missing assignments/definitions are explicit; catalogue file failures retain associations without invented definitions. Existing NVD failures remain terminal.
+- Verification: 118 offline tests passed; compileall, lock check, dependency check and diff whitespace check passed. MITRE release 5.0 (2026-10-28).

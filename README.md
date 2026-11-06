@@ -107,3 +107,12 @@ git diff --check
 ```
 
 See [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) for the complete JSON-fixture migration, live debugger investigation, timing results, and remaining bottlenecks.
+
+Recorded CWE context is constructed in application code from NVD weakness associations,
+normalized and deduplicated across sources (placeholders excluded). Definitions come
+from the bundled MITRE catalogue in `fixtures/cwe/catalogue.json`, including release
+and source XML hash provenance. No runtime catalogue request or LLM reconstruction
+occurs. Missing assignments and unavailable definitions are stated explicitly; an
+unreadable catalogue retains identifiers with unavailable definitions. NVD retrieval
+failures remain terminal. Both active LLM stages include this supporting context in
+their rendered input budgets. Associations and catalogue metadata persist in logs.

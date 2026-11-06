@@ -359,6 +359,9 @@ def _run_cases(
             entry = {
                 "status": status,
                 "pipeline_warnings": warnings,
+                "cwe_associations": state.get("cwe_associations", []),
+                "cwe_catalogue": state.get("cwe_catalogue", {}),
+                "cwe_context": state.get("cwe_context", ""),
                 "nvd_description": state.get("nvd_description", ""),
                 "nvd_references_pages": state.get("nvd_references_pages", {}),
                 "nvd_references_chunks": state.get("nvd_references_chunks", {}),

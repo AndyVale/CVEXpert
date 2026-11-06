@@ -341,7 +341,7 @@ Return a JSON object with:
             
             try:
                 prompt_builder = lambda value: self._get_prompt(
-                    value, cve_id, nvd_description
+                    value, cve_id, nvd_description + "\n\n" + state.get("cwe_context", "") + "\n\n" + state.get("cwe_context", "")
                 )
                 bounded_text, was_truncated = truncate_text_for_prompt(
                     text_to_analyze,

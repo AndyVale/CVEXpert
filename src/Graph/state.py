@@ -26,6 +26,9 @@ class CVEClassifierState(TypedDict, total=False):
         pipeline_warnings: Recoverable per-reference failures accumulated by pipeline stages.
     """
     cve_id: Required[str]
+    cwe_context: str
+    cwe_associations: list[dict]
+    cwe_catalogue: dict
     nvd_description: str
     nvd_url_references: list[str]
     nvd_references_pages: dict[str, str]

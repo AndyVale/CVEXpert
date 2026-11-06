@@ -36,6 +36,8 @@ def formatter(state: CVEClassifierState) -> CVEClassifierState:
     rag_text = f"""--- PRIMARY SOURCE: NVD DESCRIPTION ---
 {nvd_desc}
 
+{state.get("cwe_context", "")}
+
 --- SECONDARY SOURCES: TECHNICAL SUMMARIES ---
 {references_text}
 """
